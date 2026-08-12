@@ -10,14 +10,11 @@ UPLOAD_FOLDER = './uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# 実行環境の環境変数に GEMINI_API_KEY を設定するか、直接文字列で指定してください。
-# GitHub等に公開する場合は、直書きせずに環境変数(os.environ.get)を使用してください。
+# 環境変数からAPIキーを取得
 API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# 新しいSDKのClientを使用して初期化します
-# APIキーが取得できない場合の簡易的なエラーハンドリングを追加
 if not API_KEY:
-    print("WARNING: GEMINI_API_KEY が設定されていません。AI解析は失敗します。")
+    print("WARNING: GEMINI_API_KEY が設定されていません。")
     client = None
 else:
     client = genai.Client(api_key=API_KEY)
@@ -25,7 +22,6 @@ else:
 DB_PATH = 'finance_data.db'
 
 def init_db():
-    """SQLiteデータベースとテーブルの作成"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS reports (
@@ -40,17 +36,12 @@ def init_db():
 init_db()
 
 def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
-    """
-    決算短信と決算説明資料の両方を読み込み、AIに渡す方式。
-    """
-    # APIキー未設定エラーをフロントに返すためのチェック
     if not client:
         raise ValueError("サーバー側の設定エラー: GEMINI_API_KEY が設定されていません。")
 
     all_text = ""
     presentation_text = ""
 
-    # STREAMING_CHUNK:決算短信からテキストを抽出（冒頭15ページ）...
     with pdfplumber.open(tanshin_path) as pdf:
         for i, page in enumerate(pdf.pages):
             if i >= 15:
@@ -59,7 +50,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
             if text:
                 all_text += f"--- 短信 Page {i+1} ---\n{text}\n\n"
 
-    # STREAMING_CHUNK:決算説明資料からテキストを抽出（冒頭30ページ）...
     if presentation_path:
         try:
             with pdfplumber.open(presentation_path) as pdf:
@@ -72,7 +62,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
         except Exception as e:
             print(f"決算説明資料の読み込みエラー: {e}")
 
-    # STREAMING_CHUNK:プロンプトの構築（AIへの指示）...
     prompt = f"""
     あなたは百戦錬磨の機関投資家・財務アナリストです。提供された「決算短信」と「決算説明資料(ある場合)」のテキストから財務数値を抽出し、指定のJSONフォーマットで出力してください。
 
@@ -128,7 +117,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     }}
     """
 
-    # STREAMING_CHUNK:Gemini APIへ解析リクエストを送信...
     response = client.models.generate_content(
         model='gemini-3.6-flash',
         contents=prompt,
@@ -137,7 +125,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
         )
     )
     
-    # STREAMING_CHUNK:レスポンスをJSONとして安全にパース...
     text = response.text.strip()
     if text.startswith("
 ```json"):
@@ -153,10 +140,8 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
 
 @app.route('/')
 def index():
-    """フロントエンドのHTMLを返します。"""
     return send_file('index.html')
 
-# STREAMING_CHUNK:ファイルのアップロードと解析エンドポイント...
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'tanshin' not in request.files:
@@ -192,16 +177,13 @@ def upload_file():
         error_msg = str(e)
         print(f"解析エラー: {error_msg}")
         
-        # APIの高負荷・混雑エラーを検知して日本語化
         if "503" in error_msg or "high demand" in error_msg.lower() or "unavailable" in error_msg.lower():
             error_msg = "現在、AIサーバー（Google Gemini）が大変混み合っており一時的に利用できません。数分ほど時間を置いてから、再度「解析スタート」をお試しください。"
             
         return jsonify({'success': False, 'error': error_msg})
 
-# STREAMING_CHUNK:企業検索エンドポイント...
 @app.route('/search_companies', methods=['GET'])
 def search_companies():
-    """DBから企業名またはコードで検索"""
     q = request.args.get('q', '')
     if not q:
         return jsonify([])
@@ -220,10 +202,8 @@ def search_companies():
         
     return jsonify(results)
 
-# STREAMING_CHUNK:企業データ取得エンドポイント...
 @app.route('/get_company_data/<int:id>', methods=['GET'])
 def get_company_data(id):
-    """指定されたIDの解析済みJSONデータを返す"""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT data_json FROM reports WHERE id = ?', (id,))
@@ -236,31 +216,3 @@ def get_company_data(id):
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
-```eof
-
-画像を確認しました！
-GitHubのセキュリティ機能である「シークレットスキャン」が作動して、アップロードをブロックしてくれている状態ですね。これは**非常に優秀でありがたい機能**です！
-
-### なぜエラーが出たのか？
-`app.py` の15行目付近に、`API_KEY = "AQ.Ab8RN6JA..."` のように、**実際のGemini APIキーの文字列を直接書き込んだまま**にしていましたよね。
-GitHubは世界中に公開される可能性がある場所なので、APIキーのような「秘密のパスワード」がコード内に直接書かれているのを発見すると、「このままアップロードすると、世界中の悪意ある人にAPIキーを盗まれて悪用されちゃうよ！」と警告し、強制的にストップをかけてくれます。
-
-### どうやって解決するか？（環境変数を使う）
-クラウド（Renderなど）にデプロイする際の**絶対的な鉄則**として、パスワードやAPIキーはコードに直接書かず、**「環境変数（Environment Variables）」**という、サーバー側だけに設定する「見えない引き出し」から読み込むようにします。
-
-上記で出力した `app.py` では、APIキーを直接書くのをやめ、サーバーから読み込むようにコードを修正しました。
-（`API_KEY = os.environ.get("GEMINI_API_KEY")` という形になっています）
-
-### 具体的な解決ステップ
-
-**1. ご自身のMacにある `app.py` を修正する**
-お手元の `app.py` を、上記で出力した最新のコードで上書き保存してください。これでAPIキーの文字列がコードから消え去ります。
-
-**2. GitHubへもう一度アップロード（プッシュ）する**
-コードからAPIキーが消えたので、もう警告は出ません。
-先ほどと同じように、Macのターミナルで以下のコマンドを順番に実行してください。
-
-```bash
-git add app.py
-git commit -m "Remove API key and use env var"
-git push -u origin main

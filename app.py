@@ -11,7 +11,6 @@ UPLOAD_FOLDER = './uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# STREAMING_CHUNK:環境変数からAPIキーを取得...
 API_KEY = os.environ.get("GEMINI_API_KEY")
 
 if not API_KEY:
@@ -22,7 +21,6 @@ else:
 
 DB_PATH = 'finance_data.db'
 
-# STREAMING_CHUNK:データベースの初期化...
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute('''
@@ -37,7 +35,6 @@ def init_db():
         ''')
 init_db()
 
-# STREAMING_CHUNK:PDFからテキストを抽出する関数...
 def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     if not client:
         raise ValueError("サーバー側の設定エラー: GEMINI_API_KEY が設定されていません。")
@@ -65,7 +62,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
         except Exception as e:
             print(f"決算説明資料の読み込みエラー: {e}")
 
-    # STREAMING_CHUNK:AIへのプロンプトを構築...
     prompt = f"""
     あなたはトップティア証券会社のシニア・エクイティアナリストです。提供された「決算短信」と「決算説明資料(ある場合)」から財務数値を抽出し、指定のJSONフォーマットで出力してください。
 
@@ -130,7 +126,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     }}
     """
 
-    # STREAMING_CHUNK:Gemini APIへリクエストを送信...
     response = client.models.generate_content(
         model='gemini-3.6-flash',
         contents=prompt,
@@ -139,22 +134,19 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
         )
     )
     
-    # STREAMING_CHUNK:AIからのレスポンスを安全にパース...
-    text = response.text.strip()
+    raw_text = response.text.strip()
     
-    # AIが囲み記号を返した場合でも安全に除去する処理（文法エラーを確実に回避）
-    lines = text.splitlines()
-    if lines and lines[0].startswith("
-```"):
-        lines = lines[1:]
-    if lines and lines[-1].startswith("
-```"):
-        lines = lines[:-1]
-    cleaned_text = "\n".join(lines).strip()
-        
-    return json.loads(cleaned_text)
+    # 最初の '{' から最後の '}' までを抽出してJSONとして読み込む（文法エラーを完全に防ぐ処理）
+    start_idx = raw_text.find('{')
+    end_idx = raw_text.rfind('}')
+    
+    if start_idx != -1 and end_idx != -1:
+        json_str = raw_text[start_idx:end_idx+1]
+    else:
+        json_str = raw_text
 
-# STREAMING_CHUNK:ルーティングの設定...
+    return json.loads(json_str)
+
 @app.route('/')
 def index():
     return send_file('index.html')

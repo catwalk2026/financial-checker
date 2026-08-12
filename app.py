@@ -2,6 +2,7 @@ import os
 import json
 import sqlite3
 import pdfplumber
+import re
 from google import genai
 from flask import Flask, request, jsonify, send_file
 
@@ -10,7 +11,6 @@ UPLOAD_FOLDER = './uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# 環境変数からAPIキーを取得
 API_KEY = os.environ.get("GEMINI_API_KEY")
 
 if not API_KEY:
@@ -126,15 +126,11 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     )
     
     text = response.text.strip()
-    if text.startswith("
-```json"):
-        text = text[7:]
-    elif text.startswith("
-```"):
-        text = text[3:]
-    if text.endswith("
-```"):
-        text = text[:-3]
+    
+    # 完全な正規表現を用いて安全にパース
+    text = re.sub(r'^```json\s*', '', text)
+    text = re.sub(r'^```\s*', '', text)
+    text = re.sub(r'```\s*$', '', text)
         
     return json.loads(text.strip())
 

@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>決算書チェッカー Ver.AI</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        turq: { main: '#25B2C7', bg: '#60C7D5' },
+                        tblack: '#2F3842',
+                        orange: '#F77261',
+                        stone: '#596572',
+                        ivory: { text: '#CBC2B3', bg: '#F8F6ED' },
+                        mint: { main: '#42B187', bg: '#60D5A9' },
+                        yellow: { main: '#C4BF4D', bg: '#E5EB67' },
+                        borderlt: '#F7F7F8'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; background-color: #F8F6ED; }
+
+        .form-input {
+            width: 100%; padding: 8px 10px; border: 1px solid #E2E8F0; border-radius: 8px;
+            color: #2F3842; transition: all 0.2s; font-size: 14px; outline: none; background-color: white; text-align: right;
+        }
+        .form-input.text-left { text-align: left; }
+        .form-input:focus { border-color: #60C7D5; box-shadow: 0 0 0 3px rgba(96, 199, 213, 0.2); }
+        .form-label { font-size: 12px; font-weight: bold; color: #596572; margin-bottom: 6px; display: block; }
+
+        .sec-title { font-size: 20px; font-weight: bold; color: #2F3842; display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+        .sec-title::before { content: ''; display: block; width: 6px; height: 24px; background-color: #25B2C7; border-radius: 4px; }
+
+        .drop-area {
+            border: 2px dashed #60C7D5; background-color: #FAFCFC; border-radius: 12px; padding: 40px; text-align: center; cursor: pointer; transition: background 0.3s;
+        }
+        .drop-area.dragover { background-color: #E6F7F9; border-color: #25B2C7; }
+
+        #loading { display: none; position: fixed; inset: 0; background: rgba(255,255,255,0.9); z-index: 100; flex-direction: column; justify-content: center; align-items: center; }
+        .spinner { border: 4px solid rgba(96, 199, 213, 0.3); border-top: 4px solid #25B2C7; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* 画像保存時の白飛び・かすれ防止用（入力フォームをspanに置換） */
+        .print-text { display: none; font-size: 14px; padding: 8px 10px; border: 1px solid transparent; text-align: right; background-color: white; min-height: 38px;}
+        .print-text.text-left { text-align: left; }
+
+        /* JPEG保存時の横長（ダッシュボード型）レイアウト設定 */
+        .capturing {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: stretch !important;
+            width: 1920px !important;
+            max-width: none !important;
+            gap: 40px !important;
+            padding: 40px !important;
+            background-color: #FFFFFF !important;
+            box-sizing: border-box !important;
+        }
+        .capturing > button { display: none !important; }
+        .capturing #tab1 {
+            width: 65% !important;
+            flex-shrink: 0 !important;
+            margin-top: 0 !important;
+        }
+        .capturing #tab2 {
+            width: calc(35% - 40px) !important;
+            flex-shrink: 0 !important;
+            margin-top: 0 !important;
+            background-color: #FAFCFC !important;
+            padding: 30px !important;
+            border-radius: 16px !important;
+            border: 2px dashed #E2E8F0 !important;
+        }
+        .capturing .form-input { display: none !important; }
+        .capturing .print-text { display: block !important; border-color: #E2E8F0; border-radius: 8px;}
+    </style>
+</head>
+<body class="text-tblack min-h-screen pb-20">
+
+    <div id="loading">
+        <div class="spinner mb-4"></div>
+        <div id="loading-text" class="text-turq-main font-bold text-lg text-center">AIが解析中...<br><span class="text-sm font-normal text-stone">※通信量を抑え、高速化しました</span></div>
+    </div>
+
+    <div id="toast" class="fixed top-5 right-5 bg-tblack text-white px-6 py-3 rounded-lg shadow-lg transform transition-transform duration-300 translate-x-full z-50 flex items-center gap-3">
+        <i class="fa-solid fa-circle-check text-mint-main"></i><span id="toast-msg"></span>
+    </div>
+
+    <div class="max-w-6xl mx-auto mt-8 px-4">
+
+        <div class="bg-white rounded-xl shadow-sm border border-borderlt p-6 mb-6 flex justify-between items-center relative z-20">
+            <h1 class="text-3xl font-bold text-turq-main">決算書チェッカー Ver.AI</h1>
+            <div class="flex items-center gap-3 relative">
+                <span class="text-sm font-bold text-stone"><i class="fa-solid fa-magnifying-glass"></i> 過去データ検索:</span>
+                <div class="relative">
+                    <input type="text" id="search-input" class="form-input w-64 text-left" placeholder="企業名やコードを入力...">
+                    <ul id="search-results" class="absolute top-full left-0 w-full bg-white border border-borderlt rounded-lg shadow-lg mt-1 hidden max-h-48 overflow-y-auto z-30"></ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm border border-borderlt p-8 mb-6">
+            <div class="grid grid-cols-2 gap-6 mb-6">
+                <!-- 決算短信（必須） -->
+                <div id="drop-area-tanshin" class="drop-area" onclick="document.getElementById('pdf-tanshin').click()">
+                    <i class="fa-solid fa-file-pdf text-4xl text-turq-main mb-3"></i>
+                    <div class="font-bold text-base text-tblack mb-1">1. 決算短信 (必須)</div>
+                    <div class="text-stone text-xs mb-3">ここにPDFをドラッグ＆ドロップ</div>
+                    <div id="file-name-tanshin" class="text-turq-main font-bold text-sm break-words"></div>
+                    <input type="file" id="pdf-tanshin" accept="application/pdf" class="hidden">
+                </div>
+
+                <!-- 決算説明資料（任意） -->
+                <div id="drop-area-presentation" class="drop-area" onclick="document.getElementById('pdf-presentation').click()">
+                    <i class="fa-solid fa-file-powerpoint text-4xl text-yellow-main mb-3"></i>
+                    <div class="font-bold text-base text-tblack mb-1">2. 決算説明資料 (任意)</div>
+                    <div class="text-stone text-xs mb-3">ここにPDFをドラッグ＆ドロップ</div>
+                    <div id="file-name-presentation" class="text-yellow-main font-bold text-sm break-words"></div>
+                    <input type="file" id="pdf-presentation" accept="application/pdf" class="hidden">
+                </div>
+            </div>
+            <div class="text-center">
+                <button id="analyze-btn" class="bg-turq-main text-white font-bold py-3 px-12 rounded-full hover:opacity-80 transition shadow-md text-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled onclick="submitFiles()">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> AIで解析スタート
+                </button>
+            </div>
+        </div>
+
+        <div class="flex gap-2 mb-2">
+            <button id="tab1-btn" class="bg-turq-main text-white font-bold py-3 px-8 rounded-t-xl transition" onclick="switchTab('tab1')">1. 今期の財務数値・CF</button>
+            <button id="tab2-btn" class="bg-white text-stone font-bold py-3 px-8 rounded-t-xl hover:bg-gray-50 transition border border-b-0 border-borderlt" onclick="switchTab('tab2')">2. 来期の見通し (AI)</button>
+        </div>
+
+        <div id="capture-area" class="bg-white rounded-b-xl rounded-tr-xl shadow-sm border border-borderlt p-8 relative flex flex-col md:block">
+
+            <button onclick="downloadJPEG()" class="absolute top-6 right-6 border-2 border-turq-main text-turq-main hover:bg-turq-main hover:text-white font-bold py-2 px-4 rounded-full transition flex items-center gap-2 z-10">
+                <i class="fa-solid fa-camera"></i> 分析結果をJPEG保存
+            </button>
+
+            <input type="hidden" id="is_financial" value="false">
+
+            <div id="tab1" class="block mt-4">
+
+                <div class="sec-title">基本情報 <span id="fin-badge" class="hidden ml-4 bg-orange text-white text-xs px-3 py-1 rounded-full align-middle">金融機関・IFRSモード</span></div>
+                <div class="grid grid-cols-3 gap-6 mb-10">
+                    <div><label class="form-label">企業名</label><input type="text" id="comp-name" class="form-input text-left" readonly><span class="print-text text-left" id="p-comp-name"></span></div>
+                    <div><label class="form-label">証券コード</label><input type="text" id="comp-code" class="form-input text-left" readonly><span class="print-text text-left" id="p-comp-code"></span></div>
+                    <div><label class="form-label">対象期</label><input type="text" id="comp-year" class="form-input text-left" readonly><span class="print-text text-left" id="p-comp-year"></span></div>
+                </div>
+
+                <div class="sec-title"><i class="fa-solid fa-pen-to-square text-turq-main"></i> 財務数値 <span class="text-sm text-stone font-normal">(単位：百万円)</span></div>
+                <div id="bs-container" class="grid grid-cols-4 gap-6 mb-10 bg-gray-50 p-6 rounded-xl border border-borderlt">
+                    <!-- 通常企業用 -->
+                    <div class="bs-normal"><label class="form-label">前期 流動資産 <span class="text-[10px] text-gray-400 font-normal">(前期末)</span></label><input type="number" id="bs_py_ca" class="form-input" onchange="updateUI()"><span class="print-text" id="p-bs_py_ca"></span></div>
+                    <div class="bs-normal"><label class="form-label">前期 固定資産 <span class="text-[10px] text-gray-400 font-normal">(前期末)</span></label><input type="number" id="bs_py_fa" class="form-input" onchange="updateUI()"><span class="print-text" id="p-bs_py_fa"></span></div>
+                    <div class="bs-normal"><label class="form-label">前期 流動負債 <span class="text-[10px] text-gray-400 font-normal">(前期末)</span></label><input type="number" id="bs_py_cl" class="form-input" onchange="updateUI()"><span class="print-text" id="p-bs_py_cl"></span></div>
+                    <div class="bs-normal"><label class="form-label">前期 固定負債 <span class="text-[10px] text-gray-400 font-normal">(前期末)</span></label><input type="number" id="bs_py_fl" class="form-input" onchange="updateUI()"><span class="print-text" id="p-bs_py_fl"></span></div>
+
+                    <div class="bs-normal"><label class="form-label text-turq-main">当期 流動資産</label><input type="number" id="bs_cy_ca" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-bs_cy_ca"></span></div>
+                    <div class="bs-normal"><label class="form-label text-turq-main">当期 固定資産</label><input type="number" id="bs_cy_fa" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-bs_cy_fa"></span></div>
+                    <div class="bs-normal"><label class="form-label text-turq-main">当期 流動負債</label><input type="number" id="bs_cy_cl" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-bs_cy_cl"></span></div>
+                    <div class="bs-normal"><label class="form-label text-turq-main">当期 固定負債</label><input type="number" id="bs_cy_fl" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-bs_cy_fl"></span></div>
+
+                    <!-- 金融機関用 -->
+                    <div class="bs-fin hidden"><label class="form-label">前期 総資産 <span class="text-[10px] text-gray-400 font-normal">(前期末)</span></label><input type="number" id="bs_py_ta" class="form-input" onchange="updateUI()"><span class="print-text" id="p-bs_py_ta"></span></div>
+                    <div class="bs-fin hidden"><label class="form-label text-turq-main">当期 総資産</label><input type="number" id="bs_cy_ta" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-bs_cy_ta"></span></div>
+                    <div class="col-span-2 bs-fin hidden"></div>
+                    <div class="col-span-2 bs-normal hidden"></div>
+
+                    <div class="mt-4"><label class="form-label">前期 純資産 <span class="text-[10px] text-gray-400 font-normal">(前期末)</span></label><input type="number" id="bs_py_na" class="form-input" onchange="updateUI()"><span class="print-text" id="p-bs_py_na"></span></div>
+                    <div class="mt-4"><label class="form-label text-turq-main">当期 純資産</label><input type="number" id="bs_cy_na" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-bs_cy_na"></span></div>
+                </div>
+
+                <div class="grid grid-cols-4 gap-6 mb-10 bg-gray-50 p-6 rounded-xl border border-borderlt">
+                    <div><label class="form-label"><span id="lbl_s">前期 売上高</span> <span class="text-[10px] text-gray-400 font-normal">(前年同期)</span></label><input type="number" id="pl_py_s" class="form-input" onchange="updateUI()"><span class="print-text" id="p-pl_py_s"></span></div>
+                    <div><label class="form-label"><span id="lbl_o">前期 営業利益</span> <span class="text-[10px] text-gray-400 font-normal">(前年同期)</span></label><input type="number" id="pl_py_o" class="form-input" onchange="updateUI()"><span class="print-text" id="p-pl_py_o"></span></div>
+                    <div><label class="form-label"><span id="lbl_r">前期 経常利益</span> <span class="text-[10px] text-gray-400 font-normal">(前年同期)</span></label><input type="number" id="pl_py_r" class="form-input" onchange="updateUI()"><span class="print-text" id="p-pl_py_r"></span></div>
+                    <div><label class="form-label">前期 純利益 <span class="text-[10px] text-gray-400 font-normal">(前年同期)</span></label><input type="number" id="pl_py_n" class="form-input" onchange="updateUI()"><span class="print-text" id="p-pl_py_n"></span></div>
+
+                    <div><label class="form-label text-turq-main"><span id="lbl_s_cy">当期 売上高</span></label><input type="number" id="pl_cy_s" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-pl_cy_s"></span></div>
+                    <div><label class="form-label text-turq-main"><span id="lbl_o_cy">当期 営業利益</span></label><input type="number" id="pl_cy_o" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-pl_cy_o"></span></div>
+                    <div><label class="form-label text-turq-main"><span id="lbl_r_cy">当期 経常利益</span></label><input type="number" id="pl_cy_r" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-pl_cy_r"></span></div>
+                    <div><label class="form-label text-turq-main">当期 純利益</label><input type="number" id="pl_cy_n" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-pl_cy_n"></span></div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-6 mb-10 bg-gray-50 p-6 rounded-xl border border-borderlt">
+                    <div><label class="form-label text-turq-main">当期 営業CF</label><input type="number" id="cf_o" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-cf_o"></span></div>
+                    <div><label class="form-label text-turq-main">当期 投資CF</label><input type="number" id="cf_i" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-cf_i"></span></div>
+                    <div><label class="form-label text-turq-main">当期 財務CF</label><input type="number" id="cf_f" class="form-input border-turq-main" onchange="updateUI()"><span class="print-text" id="p-cf_f"></span></div>
+                </div>
+
+                <div class="sec-title"><i class="fa-solid fa-arrow-trend-up text-turq-main"></i> P/L 成長率サマリー（前年比）</div>
+                <div class="grid grid-cols-3 gap-6 mb-10">
+                    <div class="bg-white border border-borderlt shadow-sm rounded-xl p-6 text-center">
+                        <div class="text-stone font-bold mb-2">🚀 <span id="gr_lbl_s">売上高</span> 成長率</div>
+                        <div id="gr-sales" class="text-3xl font-bold">-</div>
+                    </div>
+                    <div class="bg-white border border-borderlt shadow-sm rounded-xl p-6 text-center">
+                        <div class="text-stone font-bold mb-2">💎 <span id="gr_lbl_o">営業利益</span> 成長率</div>
+                        <div id="gr-op" class="text-3xl font-bold">-</div>
+                    </div>
+                    <div class="bg-white border border-borderlt shadow-sm rounded-xl p-6 text-center">
+                        <div class="text-stone font-bold mb-2">👑 当期純利益 成長率</div>
+                        <div id="gr-net" class="text-3xl font-bold">-</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-6 mb-10">
+                    <div class="bg-white border border-borderlt shadow-sm rounded-xl p-4 flex flex-col justify-between h-full">
+                        <div class="text-center font-bold text-stone text-sm mb-4">B/S構造 (資産/負債純資産)</div>
+                        <div class="flex-grow flex items-center justify-center h-48">
+                            <canvas id="bsChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white border border-borderlt shadow-sm rounded-xl p-4 flex flex-col justify-between h-full">
+                        <div class="text-center font-bold text-stone text-sm mb-4">P/L 段階利益 (前年 vs 当期)</div>
+                        <div class="flex-grow flex items-center justify-center h-48">
+                            <canvas id="plChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="bg-white border border-borderlt shadow-sm rounded-xl p-4 flex flex-col justify-between h-full">
+                        <div class="text-center font-bold text-stone text-sm mb-4">キャッシュ・フロー状況</div>
+                        <div class="mb-4 flex-grow flex items-center justify-center h-32">
+                            <canvas id="cfChart"></canvas>
+                        </div>
+                        <div class="text-center mt-auto">
+                            <span id="cf-phase" class="bg-ivory-bg text-stone font-bold py-1 px-3 rounded-full border border-borderlt shadow-sm text-xs inline-block mb-2">判定中...</span>
+                            <p id="cf-desc" class="text-xs text-stone leading-relaxed m-0 text-left">ここに解説文が表示されます</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-[#F0FBFC] border border-turq-bg rounded-xl p-6 shadow-sm">
+                    <h3 class="text-lg font-bold text-turq-main mb-4 flex items-center gap-2"><i class="fa-solid fa-robot"></i> AIによる当期変動・背景要約</h3>
+                    <div id="ai-tab1-summary" class="text-tblack leading-relaxed whitespace-pre-wrap text-sm">ここにAIの要約が表示されます。</div>
+                </div>
+            </div>
+
+            <div id="tab2" class="hidden mt-4">
+
+                <div class="sec-title"><i class="fa-solid fa-bolt text-yellow-main"></i> 来期予想</div>
+
+                <div class="grid grid-cols-3 gap-6 mb-10 bg-yellow-50 p-6 rounded-xl border border-yellow-main">
+                    <div>
+                        <label class="form-label text-yellow-main">来期予想 売上</label>
+                        <input type="number" id="fc_s" class="form-input border-yellow-main bg-white" onchange="updateUI()">
+                        <span class="print-text" id="p-fc_s"></span>
+                    </div>
+                    <div>
+                        <label class="form-label text-yellow-main">来期予想 営業利益</label>
+                        <input type="number" id="fc_o" class="form-input border-yellow-main bg-white" onchange="updateUI()">
+                        <span class="print-text" id="p-fc_o"></span>
+                    </div>
+                    <div>
+                        <label class="form-label text-yellow-main">来期予想 純利益</label>
+                        <input type="number" id="fc_n" class="form-input border-yellow-main bg-white" onchange="updateUI()">
+                        <span class="print-text" id="p-fc_n"></span>
+                    </div>
+                </div>
+
+                <div class="bg-white border border-borderlt shadow-sm rounded-xl p-6 flex flex-col justify-between mb-10">
+                    <div class="text-center font-bold text-stone text-sm mb-4">来期予想 (当期 vs 来期)</div>
+                    <div class="flex-grow flex items-center justify-center h-64">
+                        <canvas id="fcChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-[#F0FBFC] border border-turq-bg rounded-xl p-6 shadow-sm">
+                    <h3 class="text-lg font-bold text-turq-main mb-4 flex items-center gap-2"><i class="fa-solid fa-robot"></i> AIによる来期見通しの解説</h3>
+                    <div id="ai-tab2-summary" class="text-tblack leading-relaxed whitespace-pre-wrap text-sm">ここにAIの要約が表示されます。</div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let bsChart, plChart, cfChart, fcChart;
+
+        // Chart.jsが完全にロードされるのを待つ関数
+        function ensureChartIsLoaded(callback) {
+            if (typeof Chart !== 'undefined') {
+                callback();
+            } else {
+                setTimeout(() => ensureChartIsLoaded(callback), 100);
+            }
+        }
+
+        function showLoading(msg) { document.getElementById('loading-text').innerHTML = msg + '<br><span class="text-sm font-normal text-stone">※通信量を抑え、高速化しました</span>'; document.getElementById('loading').style.display = 'flex'; }
+        function hideLoading() { document.getElementById('loading').style.display = 'none'; }
+        function showToast(msg) {
+            document.getElementById('toast-msg').innerText = msg;
+            const t = document.getElementById('toast'); t.classList.remove('translate-x-full');
+            setTimeout(() => t.classList.add('translate-x-full'), 3000);
+        }
+
+        function switchTab(id) {
+            document.getElementById('tab1').classList.add('hidden');
+            document.getElementById('tab2').classList.add('hidden');
+            document.getElementById(id).classList.remove('hidden');
+
+            const btn1 = document.getElementById('tab1-btn');
+            const btn2 = document.getElementById('tab2-btn');
+
+            if(id === 'tab1'){
+                btn1.className = "bg-turq-main text-white font-bold py-3 px-8 rounded-t-xl transition";
+                btn2.className = "bg-white text-stone font-bold py-3 px-8 rounded-t-xl hover:bg-gray-50 transition border border-b-0 border-borderlt";
+            } else {
+                btn1.className = "bg-white text-stone font-bold py-3 px-8 rounded-t-xl hover:bg-gray-50 transition border border-b-0 border-borderlt";
+                btn2.className = "bg-turq-main text-white font-bold py-3 px-8 rounded-t-xl transition";
+            }
+
+            updateUI();
+        }
+
+        let tanshinFile = null;
+        let presentationFile = null;
+
+        function setupDropArea(areaId, inputId, nameId, type) {
+            const dropArea = document.getElementById(areaId);
+            const fileInput = document.getElementById(inputId);
+            const nameDiv = document.getElementById(nameId);
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(ev => dropArea.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); }));
+            ['dragenter', 'dragover'].forEach(ev => dropArea.addEventListener(ev, () => dropArea.classList.add('dragover')));
+            ['dragleave', 'drop'].forEach(ev => dropArea.addEventListener(ev, () => dropArea.classList.remove('dragover')));
+
+            dropArea.addEventListener('drop', e => handleFileSelect(e.dataTransfer.files[0], type, nameDiv));
+            fileInput.addEventListener('change', e => handleFileSelect(e.target.files[0], type, nameDiv));
+        }
+
+        function handleFileSelect(file, type, nameDiv) {
+            if (!file) return;
+            if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+                alert('PDFファイルを選択してください。');
+                return;
+            }
+
+            if (type === 'tanshin') {
+                tanshinFile = file;
+                // 短信がセットされたら解析ボタンを有効化
+                document.getElementById('analyze-btn').disabled = false;
+            } else {
+                presentationFile = file;
+            }
+            nameDiv.innerText = file.name;
+            showToast(`${file.name} をセットしました。`);
+        }
+
+        setupDropArea('drop-area-tanshin', 'pdf-tanshin', 'file-name-tanshin', 'tanshin');
+        setupDropArea('drop-area-presentation', 'pdf-presentation', 'file-name-presentation', 'presentation');
+
+        async function submitFiles() {
+            if (!tanshinFile) {
+                alert("決算短信のPDFは必須です。");
+                return;
+            }
+
+            showLoading("AIがPDFを解析中...");
+
+            const formData = new FormData();
+            formData.append('tanshin', tanshinFile);
+            if (presentationFile) {
+                formData.append('presentation', presentationFile);
+            }
+
+            try {
+                const res = await fetch('/upload', { method: 'POST', body: formData });
+                const json = await res.json();
+                if (json.success) {
+                    populateUI(json.data);
+                    showToast("解析成功！データベースに保存されました。");
+                } else {
+                    alert("解析エラー: " + (json.error || "不明なエラー"));
+                }
+            } catch (e) {
+                console.error(e);
+                alert(`通信エラーが発生しました。\n詳細: ${e.message}\n※サーバーが起動しているか確認してください。`);
+            } finally {
+                hideLoading();
+                // UIのリセット
+                tanshinFile = null;
+                presentationFile = null;
+                document.getElementById('file-name-tanshin').innerText = '';
+                document.getElementById('file-name-presentation').innerText = '';
+                document.getElementById('pdf-tanshin').value = '';
+                document.getElementById('pdf-presentation').value = '';
+                document.getElementById('analyze-btn').disabled = true;
+            }
+        }
+
+        const searchInput = document.getElementById('search-input');
+        const searchResults = document.getElementById('search-results');
+        let searchTimeout;
+
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(searchTimeout);
+            const q = e.target.value.trim();
+            if (!q) { searchResults.classList.add('hidden'); return; }
+
+            searchTimeout = setTimeout(async () => {
+                try {
+                    const res = await fetch('/search_companies?q=' + encodeURIComponent(q));
+                    const list = await res.json();
+                    searchResults.innerHTML = '';
+                    if (list.length > 0) {
+                        list.forEach(item => {
+                            const li = document.createElement('li');
+                            li.className = "px-4 py-3 hover:bg-turq-main hover:text-white cursor-pointer text-sm text-tblack border-b border-borderlt transition";
+                            li.innerHTML = `<span class="font-bold">${item.company_name}</span> <span class="text-xs">(${item.fiscal_year})</span>`;
+                            li.onclick = () => loadCompanyData(item.id, item.company_name);
+                            searchResults.appendChild(li);
+                        });
+                        searchResults.classList.remove('hidden');
+                    } else {
+                        searchResults.innerHTML = '<li class="px-4 py-3 text-sm text-stone">見つかりません</li>';
+                        searchResults.classList.remove('hidden');
+                    }
+                } catch (e) { console.error("Search Error:", e); }
+            }, 300);
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+                searchResults.classList.add('hidden');
+            }
+        });
+
+        async function loadCompanyData(id, name) {
+            searchResults.classList.add('hidden');
+            searchInput.value = name;
+            showLoading("過去データを読込中...");
+            try {
+                const res = await fetch('/get_company_data/' + id);
+                const json = await res.json();
+                if (json.success) {
+                    populateUI(json.data);
+                    showToast(`${name} のデータを復元しました。`);
+                } else {
+                    alert("データ復元エラー: " + json.error);
+                }
+            } catch(e) {
+                console.error(e); alert("通信エラーが発生しました。");
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function populateUI(d) {
+            const v = (id, val) => document.getElementById(id).value = val || 0;
+            const t = (id, text) => { if(document.getElementById(id)) document.getElementById(id).innerText = text; }
+
+            document.getElementById('comp-name').value = d.company || '';
+            document.getElementById('comp-code').value = d.code || '';
+            document.getElementById('comp-year').value = d.fiscal_year || '';
+
+            const isFin = d.is_financial === true;
+
+            document.getElementById('is_financial').value = isFin ? 'true' : 'false';
+
+            const finBadge = document.getElementById('fin-badge');
+            if (isFin) {
+                finBadge.classList.remove('hidden');
+                finBadge.innerText = "金融機関モード";
+                document.querySelectorAll('.bs-normal').forEach(el => el.classList.add('hidden'));
+                document.querySelectorAll('.bs-fin').forEach(el => el.classList.remove('hidden'));
+            } else {
+                finBadge.classList.add('hidden');
+                document.querySelectorAll('.bs-normal').forEach(el => el.classList.remove('hidden'));
+                document.querySelectorAll('.bs-fin').forEach(el => el.classList.add('hidden'));
+            }
+
+            const lbl = d.labels || {};
+            const ls = lbl.sales || "売上高";
+            const lo = lbl.op_profit || "営業利益";
+            const lr = lbl.ord_profit || "経常利益";
+
+            t('lbl_s', `前期 ${ls}`); t('lbl_s_cy', `当期 ${ls}`); t('gr_lbl_s', ls);
+            t('lbl_o', `前期 ${lo}`); t('lbl_o_cy', `当期 ${lo}`); t('gr_lbl_o', lo);
+            t('lbl_r', `前期 ${lr}`); t('lbl_r_cy', `当期 ${lr}`);
+
+            v('bs_py_ca', d.bs_current_assets_prev); v('bs_cy_ca', d.bs_current_assets);
+            v('bs_py_fa', d.bs_fixed_assets_prev); v('bs_cy_fa', d.bs_fixed_assets);
+            v('bs_py_cl', d.bs_current_liabilities_prev); v('bs_cy_cl', d.bs_current_liabilities);
+            v('bs_py_fl', d.bs_fixed_liabilities_prev); v('bs_cy_fl', d.bs_fixed_liabilities);
+
+            v('bs_py_ta', d.bs_total_assets_prev); v('bs_cy_ta', d.bs_total_assets_now);
+            v('bs_py_na', d.bs_equity_prev); v('bs_cy_na', d.bs_equity);
+
+            v('pl_py_s', d.pl_sales_prev); v('pl_cy_s', d.pl_sales_now);
+            v('pl_py_o', d.pl_op_profit_prev); v('pl_cy_o', d.pl_op_profit_now);
+            v('pl_py_r', d.pl_ord_profit_prev); v('pl_cy_r', d.pl_ord_profit_now);
+            v('pl_py_n', d.pl_net_profit_prev); v('pl_cy_n', d.pl_net_profit_now);
+
+            v('cf_o', d.cf_operating); v('cf_i', d.cf_investing); v('cf_f', d.cf_financing);
+
+            const fd = d.forecast_data || {};
+            v('fc_s', fd.sales); v('fc_o', fd.op_profit); v('fc_n', fd.net_profit);
+
+            if (d.ai_analysis) {
+                document.getElementById('ai-tab1-summary').innerText = d.ai_analysis.tab1_summary || "要約がありません。";
+                document.getElementById('ai-tab2-summary').innerText = d.ai_analysis.tab2_summary || "要約がありません。";
+            }
+
+            switchTab('tab1');
+        }
+
+        function updateUI() {
+            const g = id => Number(document.getElementById(id).value) || 0;
+            const isFin = document.getElementById('is_financial').value === 'true';
+
+            const py_s = g('pl_py_s'), cy_s = g('pl_cy_s');
+            const py_o = g('pl_py_o'), cy_o = g('pl_cy_o');
+            const py_n = g('pl_py_n'), cy_n = g('pl_cy_n');
+
+            const calcG = (oldV, newV) => {
+                if(!oldV) return '-';
+                const r = ((newV - oldV) / Math.abs(oldV)) * 100;
+                return `<span class="${r >= 0 ? 'text-turq-main' : 'text-orange'}">${r > 0 ? '+' : ''}${r.toFixed(1)}%</span>`;
+            };
+            document.getElementById('gr-sales').innerHTML = calcG(py_s, cy_s);
+            document.getElementById('gr-op').innerHTML = calcG(py_o, cy_o);
+            document.getElementById('gr-net').innerHTML = calcG(py_n, cy_n);
+
+            const cf_o = g('cf_o'), cf_i = g('cf_i'), cf_f = g('cf_f');
+            const sign = v => v >= 0 ? "+" : "-";
+            const pat = sign(cf_o) + sign(cf_i) + sign(cf_f);
+
+            const phases = {
+                "+++": { name: "追風・リストラ型", desc: "本業で稼ぎつつ、資産売却や資金調達で積極的な事業再編を進めているフェーズ。" },
+                "++-": { name: "健全型", desc: "本業と資産売却で得た資金で借入金を返済している、極めて財務が安全な状態。" },
+                "+-+": { name: "勝負型", desc: "本業の利益と借入金で将来への投資を積極的に行っているアグレッシブなフェーズ。" },
+                "+--": { name: "安定型", desc: "本業の利益だけで投資と借入金返済を賄えている、優良企業の最も理想的な状態。" },
+                "-++": { name: "崖っぷち型", desc: "本業の赤字を資産売却と資金調達で補填。早急な本業の立て直しが必要な状態。" },
+                "-+-": { name: "救済型", desc: "本業の赤字と借入金返済を資産売却でどうにか賄う、事業縮小に向かうフェーズ。" },
+                "--+": { name: "スタートアップ型", desc: "本業は赤字だが、外部から資金調達をして先行投資を続けるベンチャー特有の型。" },
+                "---": { name: "衰退型", desc: "本業赤字で投資も資金調達もマイナス。手元資金の枯渇リスクが高い危険な状態。" }
+            };
+
+            const phaseInfo = phases[pat] || { name: "未入力", desc: "数値を入力してください。" };
+            const phaseEl = document.getElementById('cf-phase');
+            const descEl = document.getElementById('cf-desc');
+
+            phaseEl.innerText = `${phaseInfo.name} (${pat})`;
+            phaseEl.className = `font-bold py-1 px-3 rounded-full border shadow-sm text-xs inline-block mb-2 ${pat.startsWith('-') ? 'text-orange border-orange bg-[#FEF1EF]' : 'text-turq-main border-turq-bg bg-[#E6F7F9]'}`;
+            descEl.innerText = phaseInfo.desc;
+
+            const lbl_s = document.getElementById('gr_lbl_s').innerText;
+            const lbl_o = document.getElementById('gr_lbl_o').innerText;
+            const lbl_r = document.getElementById('lbl_r_cy').innerText.replace('当期 ', '');
+
+            ensureChartIsLoaded(() => {
+                renderCharts({
+                    isFin: isFin,
+                    bs: {
+                        py_ca: g('bs_py_ca'), cy_ca: g('bs_cy_ca'),
+                        py_fa: g('bs_py_fa'), cy_fa: g('bs_cy_fa'),
+                        py_cl: g('bs_py_cl'), cy_cl: g('bs_cy_cl'),
+                        py_fl: g('bs_py_fl'), cy_fl: g('bs_cy_fl'),
+                        py_ta: g('bs_py_ta'), cy_ta: g('bs_cy_ta'),
+                        py_na: g('bs_py_na'), cy_na: g('bs_cy_na')
+                    },
+                    pl: { py_s, cy_s, py_o, cy_o, py_r: g('pl_py_r'), cy_r: g('pl_cy_r'), py_n, cy_n },
+                    fc: { s: g('fc_s'), o: g('fc_o'), n: g('fc_n') },
+                    cf: { o: cf_o, i: cf_i, f: cf_f },
+                    labels: { s: lbl_s, o: lbl_o, r: lbl_r }
+                });
+            });
+        }
+
+        function renderCharts(d) {
+            Chart.defaults.font.family = "'Helvetica Neue', Arial, sans-serif";
+
+            const ctxBs = document.getElementById('bsChart')?.getContext('2d');
+            if(ctxBs) {
+                if(bsChart) bsChart.destroy();
+                if (d.isFin) {
+                    const py_liab = d.bs.py_ta - d.bs.py_na;
+                    const cy_liab = d.bs.cy_ta - d.bs.cy_na;
+                    bsChart = new Chart(ctxBs, {
+                        type: 'bar',
+                        data: {
+                            labels: [['前期', '総資産'], ['前期', '負債・純資'], ['当期', '総資産'], ['当期', '負債・純資']],
+                            datasets: [
+                                { label: '純資産', data: [0, d.bs.py_na, 0, d.bs.cy_na], backgroundColor: '#6FAFE4', stack: '0' },
+                                { label: '負債', data: [0, py_liab > 0 ? py_liab : 0, 0, cy_liab > 0 ? cy_liab : 0], backgroundColor: '#F495A0', stack: '0' },
+                                { label: '総資産', data: [d.bs.py_ta, 0, d.bs.cy_ta, 0], backgroundColor: '#42B187', stack: '0' }
+                            ]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, ticks: {font: {size: 9}} } }, plugins: { legend: { position: 'bottom', labels:{boxWidth:8, font:{size:9}} } } }
+                    });
+                } else {
+                    bsChart = new Chart(ctxBs, {
+                        type: 'bar',
+                        data: {
+                            labels: [['前期', '資産'], ['前期', '負債・純資'], ['当期', '資産'], ['当期', '負債・純資']],
+                            datasets: [
+                                { label: '固定資産', data: [d.bs.py_fa, 0, d.bs.cy_fa, 0], backgroundColor: '#6FAFE4', stack: '0' },
+                                { label: '流動資産', data: [d.bs.py_ca, 0, d.bs.cy_ca, 0], backgroundColor: '#60C7D5', stack: '0' },
+                                { label: '純資産', data: [0, d.bs.py_na, 0, d.bs.cy_na], backgroundColor: '#42B187', stack: '0' },
+                                { label: '固定負債', data: [0, d.bs.py_fl, 0, d.bs.cy_fl], backgroundColor: '#DABD67', stack: '0' },
+                                { label: '流動負債', data: [0, d.bs.py_cl, 0, d.bs.cy_cl], backgroundColor: '#F495A0', stack: '0' }
+                            ]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true, ticks: {font: {size: 9}} } }, plugins: { legend: { position: 'bottom', labels:{boxWidth:8, font:{size:9}} } } }
+                    });
+                }
+            }
+
+            const ctxPl = document.getElementById('plChart')?.getContext('2d');
+            if(ctxPl) {
+                if(plChart) plChart.destroy();
+                plChart = new Chart(ctxPl, {
+                    type: 'bar',
+                    data: {
+                        labels: [d.labels.s, d.labels.o, d.labels.r, '純利益'],
+                        datasets: [
+                            { label: '前期', data: [d.pl.py_s, d.pl.py_o, d.pl.py_r, d.pl.py_n], backgroundColor: '#E5EB67' },
+                            { label: '当期', data: [d.pl.cy_s, d.pl.cy_o, d.pl.cy_r, d.pl.cy_n], backgroundColor: '#25B2C7' }
+                        ]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: {font: {size: 9}} } }, plugins: { legend: { position: 'bottom', labels:{boxWidth:8, font:{size:9}} } } }
+                });
+            }
+
+            const ctxCf = document.getElementById('cfChart')?.getContext('2d');
+            if(ctxCf) {
+                if(cfChart) cfChart.destroy();
+                cfChart = new Chart(ctxCf, {
+                    type: 'bar',
+                    data: {
+                        labels: ['営業CF', '投資CF', '財務CF'],
+                        datasets: [{
+                            data: [d.cf.o, d.cf.i, d.cf.f],
+                            backgroundColor: [ d.cf.o >= 0 ? '#42B187' : '#F495A0', d.cf.i >= 0 ? '#42B187' : '#F495A0', d.cf.f >= 0 ? '#42B187' : '#F495A0' ]
+                        }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: {font: {size: 9}} } }, plugins: { legend: { display: false } } }
+                });
+            }
+
+            const fcChartCanvas = document.getElementById('fcChart');
+            if(fcChartCanvas) {
+                const ctxFc = fcChartCanvas.getContext('2d');
+                if(fcChart) fcChart.destroy();
+                fcChart = new Chart(ctxFc, {
+                    type: 'bar',
+                    data: {
+                        labels: ['売上高', '営業利益', '純利益'],
+                        datasets: [
+                            { label: '当期', data: [d.pl.cy_s, d.pl.cy_o, d.pl.cy_n], backgroundColor: '#25B2C7' },
+                            { label: '来期', data: [d.fc.s, d.fc.o, d.fc.n], backgroundColor: '#C4BF4D' }
+                        ]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, scales: { y: { ticks: {font: {size: 9}} } }, plugins: { legend: { position: 'bottom', labels:{boxWidth:8, font:{size:9}} } } }
+                });
+            }
+        }
+
+        function copyValuesToSpan() {
+            const inputs = document.querySelectorAll('#capture-area input[type="text"], #capture-area input[type="number"]');
+            inputs.forEach(input => {
+                const span = document.getElementById('p-' + input.id);
+                if(span) {
+                    if(input.value !== "") {
+                        if(!isNaN(input.value) && input.type === 'number') {
+                            span.innerText = Number(input.value).toLocaleString();
+                        } else {
+                            span.innerText = input.value;
+                        }
+                    } else {
+                        span.innerText = "";
+                    }
+                }
+            });
+        }
+
+        async function downloadJPEG() {
+            showLoading("画像を生成中...");
+            const target = document.getElementById('capture-area');
+            const tab1 = document.getElementById('tab1');
+            const tab2 = document.getElementById('tab2');
+
+            const tab1WasHidden = tab1.classList.contains('hidden');
+            const tab2WasHidden = tab2.classList.contains('hidden');
+
+            tab1.classList.remove('hidden');
+            tab2.classList.remove('hidden');
+
+            await new Promise(r => setTimeout(r, 200));
+
+            copyValuesToSpan();
+            target.classList.add('capturing');
+
+            // ★横長レイアウトに変更後、グラフが崩れないよう強制リサイズ
+            if(bsChart) bsChart.resize();
+            if(plChart) plChart.resize();
+            if(cfChart) cfChart.resize();
+            if(fcChart) fcChart.resize();
+
+            // ★ここでローディング表示を強制的に隠す（白飛び・重なり防止）
+            const loadingEl = document.getElementById('loading');
+            loadingEl.style.display = 'none';
+
+            // レンダリング完了を少し長めに待機
+            await new Promise(r => setTimeout(r, 500));
+
+            try {
+                const canvas = await html2canvas(target, {
+                    scale: 2,
+                    backgroundColor: "#FFFFFF",
+                    useCORS: true,
+                    logging: false,
+                    windowWidth: 1920, // ★横長レイアウト用の幅を指定
+                    // ★さらに念押しでローディング要素を描画対象から除外
+                    ignoreElements: (element) => element.id === 'loading'
+                });
+                const link = document.createElement('a');
+                const cname = document.getElementById('comp-name').value || 'report';
+                link.download = `${cname}_analysis.jpg`;
+                link.href = canvas.toDataURL('image/jpeg', 0.95);
+                link.click();
+                showToast("画像を保存しました！");
+            } catch (e) {
+                console.error(e); alert("画像生成エラー");
+            } finally {
+                target.classList.remove('capturing');
+                if(tab1WasHidden) tab1.classList.add('hidden');
+                if(tab2WasHidden) tab2.classList.add('hidden');
+
+                // 元の画面サイズに戻した後に再度グラフをリサイズ
+                if(bsChart) bsChart.resize();
+                if(plChart) plChart.resize();
+                if(cfChart) cfChart.resize();
+                if(fcChart) fcChart.resize();
+
+                // 処理完了としてローディングを完全に消す
+                hideLoading();
+            }
+        }
+
+        window.onload = function() {
+            ensureChartIsLoaded(updateUI);
+        };
+    </script>
+</body>
+</html>

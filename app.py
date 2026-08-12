@@ -233,6 +233,3 @@ def get_company_data(id):
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
-```eof
-
-コード内の文字置換処理で改行エラーが起きないよう、行単位の配列処理に完全に書き換えました。GitHubの `app.py` に丸ごと上書き保存してください。

@@ -35,6 +35,17 @@ def init_db():
         ''')
 init_db()
 
+def clean_json_string(json_str):
+    # 生データからJSONブロックのみ抽出
+    start_idx = json_str.find('{')
+    end_idx = json_str.rfind('}')
+    if start_idx != -1 and end_idx != -1:
+        json_str = json_str[start_idx:end_idx+1]
+    
+    # 不完全な改行や制御文字の処理
+    json_str = re.sub(r'[\x00-\x1F\x7F]', ' ', json_str)
+    return json_str
+
 def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     if not client:
         raise ValueError("サーバー側の設定エラー: GEMINI_API_KEY が設定されていません。")
@@ -67,6 +78,7 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
 
     【抽出ルール（絶対厳守）】
     - 指定のJSONフォーマットのみを返すこと。
+    - JSONのキーや値の中でダブルクォーテーション(")を使う場合は、必ずエスケープ(\\")してください。
     - 単位はすべて「百万円」に換算・統一してください（例: テキストが「円」や「十億円」なら百万円に変換）。
     - 損失や減少などのマイナス値はマイナスの数値（例: -100）としてください。「△」や「()」表記はマイナスです。
     - 「金融機関」（銀行・証券など）の判定は慎重に行い、事業会社（小売や製造業で金融子会社を持つ場合など）は誤って金融機関と判定しないでください。真の金融機関で流動/固定の区分がない場合のみ is_financial を true にしてください。
@@ -135,17 +147,9 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     )
     
     raw_text = response.text.strip()
-    
-    # 最初の '{' から最後の '}' までを抽出してJSONとして読み込む（文法エラーを完全に防ぐ処理）
-    start_idx = raw_text.find('{')
-    end_idx = raw_text.rfind('}')
-    
-    if start_idx != -1 and end_idx != -1:
-        json_str = raw_text[start_idx:end_idx+1]
-    else:
-        json_str = raw_text
+    cleaned_json_str = clean_json_string(raw_text)
 
-    return json.loads(json_str)
+    return json.loads(cleaned_json_str)
 
 @app.route('/')
 def index():

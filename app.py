@@ -35,6 +35,20 @@ def init_db():
         ''')
 init_db()
 
+def clean_json_string(json_str):
+    # 生データからJSONブロックのみ抽出
+    start_idx = json_str.find('{')
+    end_idx = json_str.rfind('}')
+    if start_idx != -1 and end_idx != -1:
+        json_str = json_str[start_idx:end_idx+1]
+    
+    # 🚨AIがやりがちな「最後の要素の後の不要なカンマ」を自動削除する（エラーの主原因）
+    json_str = re.sub(r',\s*([\}\]])', r'\1', json_str)
+    
+    # 不完全な改行や制御文字の処理
+    json_str = re.sub(r'[\x00-\x1F\x7F]', ' ', json_str)
+    return json_str
+
 def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     if not client:
         raise ValueError("サーバー側の設定エラー: GEMINI_API_KEY が設定されていません。")
@@ -44,7 +58,8 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
 
     with pdfplumber.open(tanshin_path) as pdf:
         for i, page in enumerate(pdf.pages):
-            if i >= 15:
+            # タイムアウト対策：短信は冒頭10ページまでに短縮
+            if i >= 10:
                 break
             text = page.extract_text()
             if text:
@@ -54,7 +69,8 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
         try:
             with pdfplumber.open(presentation_path) as pdf:
                 for i, page in enumerate(pdf.pages):
-                    if i >= 30: 
+                    # タイムアウト対策：説明資料は冒頭20ページまでに短縮
+                    if i >= 20: 
                         break
                     text = page.extract_text()
                     if text:
@@ -66,7 +82,8 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     あなたはトップティア証券会社のシニア・エクイティアナリストです。提供された「決算短信」と「決算説明資料(ある場合)」から財務数値を抽出し、指定のJSONフォーマットで出力してください。
 
     【抽出ルール（絶対厳守）】
-    - 指定のJSONフォーマットのみを返すこと。
+    - 🚨指定のJSONフォーマットのみを返すこと。JSONの最後の要素には絶対にカンマ(,)をつけないでください。
+    - JSONのキーや値の中でダブルクォーテーション(")を使う場合は、必ずエスケープ(\\")してください。
     - 単位はすべて「百万円」に換算・統一してください（例: テキストが「円」や「十億円」なら百万円に変換）。
     - 損失や減少などのマイナス値はマイナスの数値（例: -100）としてください。「△」や「()」表記はマイナスです。
     - 「金融機関」（銀行・証券など）の判定は慎重に行い、事業会社（小売や製造業で金融子会社を持つ場合など）は誤って金融機関と判定しないでください。真の金融機関で流動/固定の区分がない場合のみ is_financial を true にしてください。
@@ -94,10 +111,10 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     - 読みやすくするため、重要なキーワードや数値は必ずMarkdownの太字（**テキスト**）を使用してください。
     - 文頭には必ず「🟢ポジティブ：」「🔴ネガティブ：」「🟡要注目(リスク)：」のラベルをつけてください。
 
-    【対象テキスト（決算短信 冒頭15ページ分）】
+    【対象テキスト（決算短信 冒頭10ページ分）】
     {all_text}
 
-    【対象テキスト（決算説明資料 冒頭30ページ分 ※存在する場合のみ）】
+    【対象テキスト（決算説明資料 冒頭20ページ分 ※存在する場合のみ）】
     {presentation_text}
 
     【期待するJSONスキーマ】
@@ -120,8 +137,8 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
         "cf_operating": 0, "cf_investing": 0, "cf_financing": 0,
         "forecast_data": {{ "sales": 0, "op_profit": 0, "net_profit": 0 }},
         "ai_analysis": {{
-            "tab1_summary": "当期の業績・財務・キャッシュフローについて、上記の＜思考フレームワーク＞を駆使し、プロのアナリストとしての鋭い洞察を箇条書きで出力してください。「なぜ儲かったのかの分解」「収益の持続性」「財務の実態」を中心に記述してください。【600〜800文字程度】",
-            "tab2_summary": "来期（次四半期）のガイダンス、設備投資、株主還元、および中長期の事業環境サイクルについて、今後の株価カタリストやダウンサイドリスクを含めた深い洞察を箇条書きで出力してください。会社発表に対する客観的なリスク評価を必ず含めてください。【600〜800文字程度】"
+            "tab1_summary": "当期の業績・財務・キャッシュフローについて、上記の＜思考フレームワーク＞を駆使し、プロのアナリストとしての鋭い洞察を箇条書きで出力してください。「なぜ儲かったのかの分解」「収益の持続性」「財務の実態」を中心に記述してください。【400文字程度】",
+            "tab2_summary": "来期（次四半期）のガイダンス、設備投資、株主還元、および中長期の事業環境サイクルについて、今後の株価カタリストやダウンサイドリスクを含めた深い洞察を箇条書きで出力してください。会社発表に対する客観的なリスク評価を必ず含めてください。【400文字程度】"
         }}
     }}
     """
@@ -135,17 +152,9 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     )
     
     raw_text = response.text.strip()
-    
-    # 最初の '{' から最後の '}' までを抽出してJSONとして読み込む（文法エラーを完全に防ぐ処理）
-    start_idx = raw_text.find('{')
-    end_idx = raw_text.rfind('}')
-    
-    if start_idx != -1 and end_idx != -1:
-        json_str = raw_text[start_idx:end_idx+1]
-    else:
-        json_str = raw_text
+    cleaned_json_str = clean_json_string(raw_text)
 
-    return json.loads(json_str)
+    return json.loads(cleaned_json_str)
 
 @app.route('/')
 def index():

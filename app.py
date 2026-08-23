@@ -23,7 +23,7 @@ else:
 
 DB_PATH = 'finance_data.db'
 
-# 🚀 非同期処理用のジョブ管理辞書
+# 非同期処理用のジョブ管理辞書
 jobs = {}
 
 def init_db():
@@ -57,7 +57,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     all_text = ""
     presentation_text = ""
 
-    # 妥協なし！短信15ページ、説明資料30ページまでしっかり読み込む
     with pdfplumber.open(tanshin_path) as pdf:
         for i, page in enumerate(pdf.pages):
             if i >= 15:
@@ -91,14 +90,14 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
 
     【超重要：B/S（貸借対照表）の負債・純資産の抽出について】
     - 「流動資産」「固定資産(非流動資産)」「流動負債」「固定負債(非流動負債)」は、必ずそれぞれの「合計値」を抽出してください。
-    - 🚨【絶対厳守】いかなる場合も、負債の項目（流動負債、固定負債）を理由なく0にしないでください。必ず表の中に数値が存在します。見出しの横に数字がなくても、そのセクションの一番下に合計額があります。
+    - 🚨【絶対厳守】いかなる場合も、負債の項目（流動負債、固定負債）を理由なく0にしないでください。必ず表の中に数値が存在します。
     - IFRS企業の場合、「非流動負債合計」の数値を bs_fixed_liabilities に必ず入れてください。
     - もし「固定負債」という項目がなく、「負債合計」と「流動負債」しかない場合は、「負債合計」から「流動負債」を引いた額を「固定負債(bs_fixed_liabilities)」として計算して入れてください。
-    - 🚨【絶対厳守】純資産（資本合計）は、必ずB/S表の最後にある「純資産合計」（IFRSの場合は資本合計）の数値を抽出してください。非支配株主持分が含まれた全体の合計額を探してください。「自己資本」ではありません。
+    - 🚨【絶対厳守】純資産（資本合計）は、必ずB/S表の最後にある「純資産合計」（IFRSの場合は資本合計）の数値を抽出してください。「自己資本」ではありません。
 
     【AIによる要約（ai_analysis）の極意：プロフェッショナル・インサイト】
     単なる事実の羅列は一切禁止します。投資家が真に求める「付加価値」を提供するため、以下の思考フレームワークを駆使してテキストを生成してください。
-    1. 【業績の因数分解】YoYだけでなくQoQのモメンタムを評価。なぜ儲かったのか（単価上昇か、数量増か等）を分解する。
+    1. 【業績の因数分解】YoYだけでなくQoQのモメンタムを評価。なぜ儲かったのか分解する。
     2. 【収益性の持続性とサイクル】足元の高収益（または赤字）は一時的か、構造的か。サイクルのどこにいるのか推測する。
     3. 【財務・CFの実態】現金の増加や借入の減少が成長投資や株主還元にどう直結しているか。
     4. 【設備投資(CAPEX)の二面性】成長への布石と、将来の供給過剰・減価償却費増リスクを指摘。
@@ -141,8 +140,9 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     }}
     """
 
+    # 正しいモデル名を指定
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-3.6-flash',
         contents=prompt,
         config=genai.types.GenerateContentConfig(
             response_mime_type="application/json"
@@ -154,7 +154,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
 
     return json.loads(cleaned_json_str)
 
-# 🚀 バックグラウンドで実行される解析タスク
 def run_analysis_job(job_id, tanshin_path, presentation_path):
     try:
         data = parse_financial_pdf_smart(tanshin_path, presentation_path)
@@ -168,13 +167,10 @@ def run_analysis_job(job_id, tanshin_path, presentation_path):
     except Exception as e:
         error_msg = str(e)
         print(f"解析エラー: {error_msg}")
-        if "503" in error_msg or "high demand" in error_msg.lower() or "unavailable" in error_msg.lower():
-            error_msg = "現在、AIサーバーが大変混み合っており一時的に利用できません。時間を置いて再度お試しください。"
         jobs[job_id] = {"status": "error", "error": error_msg}
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    print(f"予期せぬエラー: {str(e)}")
     return jsonify({'success': False, 'error': f"サーバー内部でエラーが発生しました: {str(e)}"}), 500
 
 @app.route('/')
@@ -200,7 +196,6 @@ def upload_file():
         presentation_path = os.path.join(app.config['UPLOAD_FOLDER'], 'presentation_' + presentation_file.filename)
         presentation_file.save(presentation_path)
 
-    # 🚀 非同期化: ジョブIDを発行して裏で処理を開始し、即座にレスポンスを返す
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "processing"}
     thread = threading.Thread(target=run_analysis_job, args=(job_id, tanshin_path, presentation_path))
@@ -208,7 +203,6 @@ def upload_file():
 
     return jsonify({'success': True, 'job_id': job_id})
 
-# 🚀 状態確認用の新しいエンドポイント
 @app.route('/status/<job_id>', methods=['GET'])
 def check_status(job_id):
     job = jobs.get(job_id)
@@ -249,5 +243,4 @@ def get_company_data(id):
         return jsonify({'success': False, 'error': 'データが見つかりません'})
 
 if __name__ == '__main__':
-    # スレッド処理を安定させるため threaded=True を追加
     app.run(debug=True, port=5000, threaded=True)

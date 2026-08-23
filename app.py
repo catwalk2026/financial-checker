@@ -3,6 +3,8 @@ import json
 import sqlite3
 import pdfplumber
 import re
+import threading
+import uuid
 from google import genai
 from flask import Flask, request, jsonify, send_file
 
@@ -20,6 +22,9 @@ else:
     client = genai.Client(api_key=API_KEY)
 
 DB_PATH = 'finance_data.db'
+
+# 🚀 非同期処理用のジョブ管理辞書
+jobs = {}
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
@@ -52,9 +57,10 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     all_text = ""
     presentation_text = ""
 
+    # 妥協なし！短信15ページ、説明資料30ページまでしっかり読み込む
     with pdfplumber.open(tanshin_path) as pdf:
         for i, page in enumerate(pdf.pages):
-            if i >= 10:
+            if i >= 15:
                 break
             text = page.extract_text()
             if text:
@@ -64,7 +70,7 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
         try:
             with pdfplumber.open(presentation_path) as pdf:
                 for i, page in enumerate(pdf.pages):
-                    if i >= 20: 
+                    if i >= 30: 
                         break
                     text = page.extract_text()
                     if text:
@@ -80,8 +86,8 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     - JSONのキーや値の中でダブルクォーテーション(")を使う場合は、必ずエスケープ(\\")してください。
     - 単位はすべて「百万円」に換算・統一してください（例: テキストが「円」や「十億円」なら百万円に変換）。
     - 損失や減少などのマイナス値はマイナスの数値（例: -100）としてください。「△」や「()」表記はマイナスです。
-    - 「金融機関」（銀行・証券など）の判定は慎重に行い、事業会社（小売や製造業で金融子会社を持つ場合など）は誤って金融機関と判定しないでください。真の金融機関で流動/固定の区分がない場合のみ is_financial を true にしてください。
-    - IFRSの場合は、売上高を「売上収益」、営業利益を「営業利益」、経常利益を「税引前利益」など適切なラベル名(labels)に設定してください。
+    - 「金融機関」（銀行・証券など）の判定は慎重に行い、事業会社は誤って金融機関と判定しないでください。真の金融機関で流動/固定の区分がない場合のみ is_financial を true にしてください。
+    - IFRSの場合は、売上高を「売上収益」、営業利益を「営業利益」、経常利益を「税引前利益」などに設定してください。
 
     【超重要：B/S（貸借対照表）の負債・純資産の抽出について】
     - 「流動資産」「固定資産(非流動資産)」「流動負債」「固定負債(非流動負債)」は、必ずそれぞれの「合計値」を抽出してください。
@@ -91,24 +97,22 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     - 🚨【絶対厳守】純資産（資本合計）は、必ずB/S表の最後にある「純資産合計」（IFRSの場合は資本合計）の数値を抽出してください。非支配株主持分が含まれた全体の合計額を探してください。「自己資本」ではありません。
 
     【AIによる要約（ai_analysis）の極意：プロフェッショナル・インサイト】
-    単なる事実の羅列（「売上が〇〇増えた」等）は一切禁止します。投資家が真に求める「付加価値」を提供するため、以下の思考フレームワークを駆使してテキストを生成してください。
-
-    ＜高度な思考フレームワーク＞
-    1. 【業績の因数分解】YoY(前年比)だけでなくQoQ(前四半期比)のモメンタムを評価。なぜ儲かったのか（単価(ASP)上昇か、数量増か、為替か、コスト減か）を構造的に分解する。
-    2. 【収益性の持続性とサイクル】足元の高収益（または赤字）は一時的か、構造的か。特に市況産業（半導体メモリ等）の場合は「今サイクルのどこにいるのか」を推測・評価する。
-    3. 【財務・CFの実態】現金の増加や借入の減少が「財務リスクの低下」「成長投資への余力」「株主還元余力」にどう直結しているかを見極める。
-    4. 【設備投資(CAPEX)の二面性】成長への布石としての評価と同時に、将来の供給過剰や減価償却費増によるダウンサイドリスクも必ず指摘する。
-    5. 【株主還元とカタリスト】自社株買い、増配、株式分割など、直接的な株価押し上げ要因を評価する。
-    6. 【会社予想vs客観的評価】会社側の強気（弱気）な主張を鵜呑みにせず、「前提条件（需要減など）が崩れた場合のリスク」を必ずアナリスト目線で提示する。
+    単なる事実の羅列は一切禁止します。投資家が真に求める「付加価値」を提供するため、以下の思考フレームワークを駆使してテキストを生成してください。
+    1. 【業績の因数分解】YoYだけでなくQoQのモメンタムを評価。なぜ儲かったのか（単価上昇か、数量増か等）を分解する。
+    2. 【収益性の持続性とサイクル】足元の高収益（または赤字）は一時的か、構造的か。サイクルのどこにいるのか推測する。
+    3. 【財務・CFの実態】現金の増加や借入の減少が成長投資や株主還元にどう直結しているか。
+    4. 【設備投資(CAPEX)の二面性】成長への布石と、将来の供給過剰・減価償却費増リスクを指摘。
+    5. 【株主還元とカタリスト】自社株買い、増配など。
+    6. 【会社予想vs客観的評価】強気な主張を鵜呑みにせず、前提条件が崩れた場合のリスクを提示する。
 
     【出力フォーマット指定】
     - 読みやすくするため、重要なキーワードや数値は必ずMarkdownの太字（**テキスト**）を使用してください。
     - 文頭には必ず「🟢ポジティブ：」「🔴ネガティブ：」「🟡要注目(リスク)：」のラベルをつけてください。
 
-    【対象テキスト（決算短信 冒頭10ページ分）】
+    【対象テキスト】
     {all_text}
 
-    【対象テキスト（決算説明資料 冒頭20ページ分 ※存在する場合のみ）】
+    【対象資料テキスト】
     {presentation_text}
 
     【期待するJSONスキーマ】
@@ -131,8 +135,8 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
         "cf_operating": 0, "cf_investing": 0, "cf_financing": 0,
         "forecast_data": {{ "sales": 0, "op_profit": 0, "net_profit": 0 }},
         "ai_analysis": {{
-            "tab1_summary": "当期の業績・財務・キャッシュフローについて、上記の＜思考フレームワーク＞を駆使し、プロのアナリストとしての鋭い洞察を箇条書きで出力してください。「なぜ儲かったのかの分解」「収益の持続性」「財務の実態」を中心に記述してください。【400文字程度】",
-            "tab2_summary": "来期（次四半期）のガイダンス、設備投資、株主還元、および中長期の事業環境サイクルについて、今後の株価カタリストやダウンサイドリスクを含めた深い洞察を箇条書きで出力してください。会社発表に対する客観的なリスク評価を必ず含めてください。【400文字程度】"
+            "tab1_summary": "当期の業績・財務について、プロのアナリストとしての鋭い洞察を箇条書きで出力してください。【600〜800文字程度】",
+            "tab2_summary": "来期の見通し・リスクについて、今後の株価カタリストや客観的なリスク評価を含めた深い洞察を箇条書きで出力してください。【600〜800文字程度】"
         }}
     }}
     """
@@ -149,6 +153,24 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     cleaned_json_str = clean_json_string(raw_text)
 
     return json.loads(cleaned_json_str)
+
+# 🚀 バックグラウンドで実行される解析タスク
+def run_analysis_job(job_id, tanshin_path, presentation_path):
+    try:
+        data = parse_financial_pdf_smart(tanshin_path, presentation_path)
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO reports (company_name, code, fiscal_year, data_json)
+                VALUES (?, ?, ?, ?)
+            ''', (data.get('company'), data.get('code'), data.get('fiscal_year'), json.dumps(data, ensure_ascii=False)))
+        jobs[job_id] = {"status": "done", "data": data}
+    except Exception as e:
+        error_msg = str(e)
+        print(f"解析エラー: {error_msg}")
+        if "503" in error_msg or "high demand" in error_msg.lower() or "unavailable" in error_msg.lower():
+            error_msg = "現在、AIサーバーが大変混み合っており一時的に利用できません。時間を置いて再度お試しください。"
+        jobs[job_id] = {"status": "error", "error": error_msg}
 
 @app.errorhandler(Exception)
 def handle_exception(e):
@@ -178,26 +200,21 @@ def upload_file():
         presentation_path = os.path.join(app.config['UPLOAD_FOLDER'], 'presentation_' + presentation_file.filename)
         presentation_file.save(presentation_path)
 
-    try:
-        data = parse_financial_pdf_smart(tanshin_path, presentation_path)
-        
-        with sqlite3.connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO reports (company_name, code, fiscal_year, data_json)
-                VALUES (?, ?, ?, ?)
-            ''', (data.get('company'), data.get('code'), data.get('fiscal_year'), json.dumps(data, ensure_ascii=False)))
-            
-        return jsonify({'success': True, 'data': data})
-        
-    except Exception as e:
-        error_msg = str(e)
-        print(f"解析エラー: {error_msg}")
-        
-        if "503" in error_msg or "high demand" in error_msg.lower() or "unavailable" in error_msg.lower():
-            error_msg = "現在、AIサーバー（Google Gemini）が大変混み合っており一時的に利用できません。数分ほど時間を置いてから、再度「解析スタート」をお試しください。"
-            
-        return jsonify({'success': False, 'error': error_msg})
+    # 🚀 非同期化: ジョブIDを発行して裏で処理を開始し、即座にレスポンスを返す
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {"status": "processing"}
+    thread = threading.Thread(target=run_analysis_job, args=(job_id, tanshin_path, presentation_path))
+    thread.start()
+
+    return jsonify({'success': True, 'job_id': job_id})
+
+# 🚀 状態確認用の新しいエンドポイント
+@app.route('/status/<job_id>', methods=['GET'])
+def check_status(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({'success': False, 'error': 'ジョブが見つかりません'}), 404
+    return jsonify({'success': True, **job})
 
 @app.route('/search_companies', methods=['GET'])
 def search_companies():
@@ -232,4 +249,5 @@ def get_company_data(id):
         return jsonify({'success': False, 'error': 'データが見つかりません'})
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # スレッド処理を安定させるため threaded=True を追加
+    app.run(debug=True, port=5000, threaded=True)

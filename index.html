@@ -6,6 +6,8 @@
     <title>AI決算アナリスト</title>
     <!-- Tailwind CSS (CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js (グラフ用) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
     <script>
@@ -30,27 +32,12 @@
         }
     </script>
     <style>
-        body { 
-            color: #2F3842; 
-            background-color: #F8F6ED; /* Ivory Base */
-        }
-        .card { 
-            background-color: #FFFFFF; 
-            border: 1px solid #F7F7F8; 
-            border-radius: 24px; 
-            box-shadow: 0 4px 20px rgba(0,0,0,0.03); 
-        }
-        .ai-text strong { 
-            color: #25B2C7; /* Turquoise Main */
-            font-weight: 700; 
-        }
+        body { color: #2F3842; background-color: #F8F6ED; }
+        .card { background-color: #FFFFFF; border: 1px solid #F7F7F8; border-radius: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.03); }
+        .ai-text strong { color: #25B2C7; font-weight: 700; }
         .loader {
-            border: 4px solid #F7F7F8;
-            border-top: 4px solid #25B2C7;
-            border-radius: 50%;
-            width: 48px;
-            height: 48px;
-            animation: spin 1s linear infinite;
+            border: 4px solid #F7F7F8; border-top: 4px solid #25B2C7; border-radius: 50%;
+            width: 48px; height: 48px; animation: spin 1s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
@@ -59,12 +46,12 @@
 
     <!-- ヘッダー -->
     <header class="bg-white border-b border-lightborder px-6 py-4 shadow-sm">
-        <div class="max-w-5xl mx-auto flex items-center">
+        <div class="max-w-6xl mx-auto flex items-center">
             <h1 class="text-xl font-bold text-primary-main tracking-widest">AI FINANCIAL ANALYST</h1>
         </div>
     </header>
 
-    <main class="max-w-5xl mx-auto px-4 py-10">
+    <main class="max-w-6xl mx-auto px-4 py-10">
         
         <!-- アップロードフォーム -->
         <section class="card p-8 mb-10">
@@ -105,9 +92,10 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <!-- 左側：AIインサイト -->
-                <div class="lg:col-span-2 space-y-8">
+            <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
+                
+                <!-- 左側：AIインサイト（2カラム） -->
+                <div class="xl:col-span-2 space-y-8">
                     <div class="card p-8">
                         <h3 class="text-xl font-bold text-textblack mb-6 border-b border-lightborder pb-3 flex items-center">
                             <span class="text-2xl mr-3">💡</span> プロフェッショナル・インサイト
@@ -117,15 +105,28 @@
                             <h4 class="text-sm font-bold text-mint-main bg-mint-base bg-opacity-20 px-4 py-2 rounded-full mb-4 inline-block">当期の業績・財務の実態</h4>
                             <div id="aiTab1" class="ai-text text-textblack leading-relaxed space-y-3 text-sm whitespace-pre-wrap"></div>
                         </div>
-
                         <div>
                             <h4 class="text-sm font-bold text-accentorange bg-orange-50 px-4 py-2 rounded-full mb-4 inline-block">来期の見通し・カタリストとリスク</h4>
                             <div id="aiTab2" class="ai-text text-textblack leading-relaxed space-y-3 text-sm whitespace-pre-wrap"></div>
                         </div>
                     </div>
+
+                    <!-- グラフエリア (P/L & B/S) -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <!-- P/L グラフ -->
+                        <div class="card p-6">
+                            <h4 class="text-sm font-bold text-stone mb-4 text-center">業績推移と来期予想 (P/L)</h4>
+                            <canvas id="plChart"></canvas>
+                        </div>
+                        <!-- B/S グラフ -->
+                        <div class="card p-6">
+                            <h4 class="text-sm font-bold text-stone mb-4 text-center">財務構造 (B/S)</h4>
+                            <canvas id="bsChart"></canvas>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- 右側：主要KPIダッシュボード -->
+                <!-- 右側：主要KPIダッシュボード（1カラム） -->
                 <div class="space-y-6">
                     <!-- PL情報 -->
                     <div class="card p-6">
@@ -192,17 +193,20 @@
     </main>
 
     <script>
-        // Markdownの太字(**文字**)をHTMLの<strong>タグに変換する簡易関数
+        // Markdownの太字を変換
         function parseMarkdownBold(text) {
             if (!text) return "";
             return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         }
 
-        // 数値をカンマ区切りにする関数
+        // カンマ区切り
         function fmt(num) {
             if (num === null || num === undefined) return "-";
             return Number(num).toLocaleString();
         }
+
+        let plChartInstance = null;
+        let bsChartInstance = null;
 
         const uploadForm = document.getElementById('uploadForm');
         const submitBtn = document.getElementById('submitBtn');
@@ -212,7 +216,6 @@
         uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            // UI状態の切り替え
             submitBtn.disabled = true;
             submitBtn.classList.add('opacity-50');
             loadingArea.classList.remove('hidden');
@@ -221,25 +224,13 @@
             const formData = new FormData(e.target);
             
             try {
-                // 1. バックエンドにファイルを送信して Job ID を即座に受け取る
                 const uploadRes = await fetch('/upload', { method: 'POST', body: formData });
-                
-                if (!uploadRes.ok) {
-                    throw new Error(`サーバーエラー: ${uploadRes.status}`);
-                }
+                if (!uploadRes.ok) throw new Error(`サーバーエラー: ${uploadRes.status}`);
                 
                 const uploadData = await uploadRes.json();
+                if (!uploadData.success) throw new Error(uploadData.error);
                 
-                if (!uploadData.success) {
-                    throw new Error(uploadData.error);
-                }
-                
-                const jobId = uploadData.job_id;
-                console.log("Job started with ID:", jobId);
-                
-                // 2. サーバーの処理状況を定期確認（ポーリング）する
-                pollStatus(jobId);
-                
+                pollStatus(uploadData.job_id);
             } catch (error) {
                 console.error("通信エラー:", error);
                 alert("エラーが発生しました: " + error.message);
@@ -247,17 +238,14 @@
             }
         });
 
-        // 定期的にステータスを確認する関数（3秒間隔）
         async function pollStatus(jobId) {
             try {
                 const res = await fetch(`/status/${jobId}`);
                 const result = await res.json();
                 
                 if (result.status === 'processing') {
-                    // まだ処理中なら3秒後に再帰呼び出し
                     setTimeout(() => pollStatus(jobId), 3000);
                 } else if (result.status === 'done') {
-                    // 処理完了！画面にデータを描画
                     renderDashboard(result.data);
                 } else if (result.status === 'error') {
                     throw new Error(result.error);
@@ -269,22 +257,25 @@
             }
         }
 
-        // 結果を画面に描画する関数
         function renderDashboard(data) {
+            // 基本情報
             document.getElementById('resCompany').textContent = data.company || "不明な企業";
             document.getElementById('resCode').textContent = data.code ? `(${data.code})` : "";
             document.getElementById('resFiscalYear').textContent = data.fiscal_year || "";
 
+            // AIインサイト
             if(data.ai_analysis) {
                 document.getElementById('aiTab1').innerHTML = parseMarkdownBold(data.ai_analysis.tab1_summary);
                 document.getElementById('aiTab2').innerHTML = parseMarkdownBold(data.ai_analysis.tab2_summary);
             }
 
+            // ラベル
             if(data.labels) {
                 document.getElementById('lblSales').textContent = data.labels.sales || "売上高";
                 document.getElementById('lblOpProfit').textContent = data.labels.op_profit || "営業利益";
             }
 
+            // 右側の数値群
             document.getElementById('valSales').textContent = fmt(data.pl_sales_now);
             document.getElementById('valOpProfit').textContent = fmt(data.pl_op_profit_now);
             document.getElementById('valNetProfit').textContent = fmt(data.pl_net_profit_now);
@@ -295,9 +286,7 @@
             document.getElementById('valEquity').textContent = fmt(equity);
 
             let ratio = 0;
-            if(assets > 0 && equity > 0) {
-                ratio = ((equity / assets) * 100).toFixed(1);
-            }
+            if(assets > 0 && equity > 0) ratio = ((equity / assets) * 100).toFixed(1);
             document.getElementById('valEquityRatio').textContent = `${ratio}%`;
             document.getElementById('barEquityRatio').style.width = `${Math.min(ratio, 100)}%`;
 
@@ -305,6 +294,88 @@
             document.getElementById('valCfInv').textContent = fmt(data.cf_investing);
             document.getElementById('valCfFin').textContent = fmt(data.cf_financing);
 
+            // ==========================================
+            // 📊 グラフの描画 (Chart.js)
+            // ==========================================
+            Chart.defaults.font.family = '"Noto Sans JP", sans-serif';
+            Chart.defaults.color = '#596572'; // Stone
+
+            // 1. P/L グラフ (棒グラフ) - 来期予想を追加！
+            if (plChartInstance) plChartInstance.destroy();
+            const ctxPl = document.getElementById('plChart').getContext('2d');
+            
+            // 来期予想データの安全な取得
+            const forecastSales = data.forecast_data ? data.forecast_data.sales : 0;
+            const forecastOpProfit = data.forecast_data ? data.forecast_data.op_profit : 0;
+            const forecastNetProfit = data.forecast_data ? data.forecast_data.net_profit : 0;
+
+            plChartInstance = new Chart(ctxPl, {
+                type: 'bar',
+                data: {
+                    labels: ['売上高', '営業利益', '純利益'],
+                    datasets: [
+                        {
+                            label: '前期',
+                            data: [data.pl_sales_prev, data.pl_op_profit_prev, data.pl_net_profit_prev],
+                            backgroundColor: '#CBC2B3', // Ivory Main
+                            borderRadius: 4
+                        },
+                        {
+                            label: '当期',
+                            data: [data.pl_sales_now, data.pl_op_profit_now, data.pl_net_profit_now],
+                            backgroundColor: '#25B2C7', // Turquoise Main
+                            borderRadius: 4
+                        },
+                        {
+                            label: '来期(予想)',
+                            data: [forecastSales, forecastOpProfit, forecastNetProfit],
+                            backgroundColor: '#F77261', // AccentOrange (目立たせる色)
+                            borderRadius: 4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'top' } }
+                }
+            });
+
+            // 2. B/S グラフ (積み上げ棒グラフ)
+            if (bsChartInstance) bsChartInstance.destroy();
+            const ctxBs = document.getElementById('bsChart').getContext('2d');
+            bsChartInstance = new Chart(ctxBs, {
+                type: 'bar',
+                data: {
+                    labels: ['前期 資産', '前期 負債/純資産', '当期 資産', '当期 負債/純資産'],
+                    datasets: [
+                        {
+                            label: '流動',
+                            data: [data.bs_current_assets_prev, data.bs_current_liabilities_prev, data.bs_current_assets, data.bs_current_liabilities],
+                            backgroundColor: '#42B187' // Mint Main
+                        },
+                        {
+                            label: '固定',
+                            data: [data.bs_fixed_assets_prev, data.bs_fixed_liabilities_prev, data.bs_fixed_assets, data.bs_fixed_liabilities],
+                            backgroundColor: '#C4BF4D' // AccentYellow Main
+                        },
+                        {
+                            label: '純資産',
+                            data: [0, data.bs_equity_prev, 0, data.bs_equity],
+                            backgroundColor: '#F77261' // AccentOrange
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { stacked: true },
+                        y: { stacked: true }
+                    },
+                    plugins: { legend: { position: 'top' } }
+                }
+            });
+
+            // UI切り替え
             loadingArea.classList.add('hidden');
             resultArea.classList.remove('hidden');
             submitBtn.disabled = false;

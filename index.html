@@ -3,302 +3,175 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI決算アナリスト - Pro Dashboard</title>
-    <!-- Tailwind CSS (CDN) -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>決算アナリスト</title>
     <style>
-        /* ローディングアニメーション用 */
-        .loader {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3b82f6;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        /* AIテキストの太字用 */
-        .ai-text strong {
-            color: #1e40af;
-            font-weight: 700;
-        }
+        body { font-family: sans-serif; background-color: #f4f4f9; color: #333; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1, h2, h3 { color: #2c3e50; }
+        .form-group { margin-bottom: 15px; }
+        label { font-weight: bold; display: block; margin-bottom: 5px; }
+        input[type="file"] { display: block; width: 100%; margin-bottom: 10px; }
+        button { background: #3498db; color: #fff; border: none; padding: 10px 20px; font-size: 16px; border-radius: 4px; cursor: pointer; }
+        button:disabled { background: #95a5a6; cursor: not-allowed; }
+        #loading { display: none; margin-top: 20px; font-weight: bold; color: #e67e22; }
+        #result { display: none; margin-top: 30px; }
+        .card { border: 1px solid #ddd; padding: 15px; border-radius: 5px; margin-bottom: 20px; background: #fafafa; }
+        .flex-container { display: flex; gap: 20px; }
+        .flex-item { flex: 1; }
+        .bold-text { font-weight: bold; color: #d35400; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #ecf0f1; }
+        pre { white-space: pre-wrap; font-family: inherit; line-height: 1.6; }
     </style>
 </head>
-<body class="bg-gray-50 text-gray-800 font-sans min-h-screen">
-
-    <!-- ヘッダー -->
-    <header class="bg-slate-900 text-white p-4 shadow-md">
-        <div class="max-w-6xl mx-auto flex justify-between items-center">
-            <h1 class="text-xl font-bold tracking-wider">📊 AI Financial Analyst Dashboard</h1>
-        </div>
-    </header>
-
-    <main class="max-w-6xl mx-auto p-4 py-8">
+<body>
+    <div class="container">
+        <h1>決算アナリスト</h1>
         
-        <!-- アップロードフォーム -->
-        <section class="bg-white rounded-xl shadow-sm p-6 mb-8 border border-gray-200">
-            <h2 class="text-lg font-semibold mb-4 text-gray-700">決算資料のアップロード</h2>
-            <form id="uploadForm" class="flex flex-col md:flex-row gap-4 items-end">
-                <div class="flex-1 w-full">
-                    <label class="block text-sm font-medium text-gray-600 mb-1">📄 決算短信 (PDF) <span class="text-red-500">*必須</span></label>
-                    <input type="file" name="tanshin" accept=".pdf" required
-                        class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-gray-300 rounded-md p-1 cursor-pointer">
-                </div>
-                <div class="flex-1 w-full">
-                    <label class="block text-sm font-medium text-gray-600 mb-1">📊 決算説明資料 (PDF) <span class="text-gray-400 text-xs">任意</span></label>
-                    <input type="file" name="presentation" accept=".pdf"
-                        class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-gray-50 file:text-gray-700 hover:file:bg-gray-100 border border-gray-300 rounded-md p-1 cursor-pointer">
-                </div>
-                <button type="submit" id="submitBtn" 
-                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-8 rounded-md transition-colors w-full md:w-auto shadow-sm">
-                    解析スタート
-                </button>
-            </form>
-        </section>
+        <form id="uploadForm">
+            <div class="form-group">
+                <label>決算短信 (PDF) ※必須</label>
+                <input type="file" name="tanshin" accept=".pdf" required>
+            </div>
+            <div class="form-group">
+                <label>決算説明資料 (PDF) ※任意</label>
+                <input type="file" name="presentation" accept=".pdf">
+            </div>
+            <button type="submit" id="submitBtn">解析スタート</button>
+        </form>
 
-        <!-- ローディング表示 -->
-        <div id="loadingArea" class="hidden flex flex-col items-center justify-center py-16">
-            <div class="loader mb-4"></div>
-            <p class="text-lg font-semibold text-blue-700">AIがプロのアナリスト視点で深く分析中です...</p>
-            <p class="text-sm text-gray-500 mt-2">（※資料の読み込みと考察に1〜2分ほどかかります。そのままお待ちください）</p>
-        </div>
+        <div id="loading">AIがプロのアナリストとして深く分析中です。数分かかる場合があります...</div>
 
-        <!-- 結果表示エリア -->
-        <div id="resultArea" class="hidden space-y-6">
-            
-            <!-- 企業ヘッダー -->
-            <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-blue-600 flex justify-between items-end">
-                <div>
-                    <p class="text-sm text-gray-500 font-medium mb-1" id="resFiscalYear"></p>
-                    <h2 class="text-3xl font-extrabold text-gray-900"><span id="resCompany"></span> <span class="text-xl text-gray-400 font-normal ml-2" id="resCode"></span></h2>
-                </div>
+        <div id="result">
+            <div class="card">
+                <h2>基本情報</h2>
+                <p><strong>企業名:</strong> <span id="resCompany"></span></p>
+                <p><strong>証券コード:</strong> <span id="resCode"></span></p>
+                <p><strong>決算期:</strong> <span id="resFiscalYear"></span></p>
             </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <!-- 左側：AIインサイト（2カラム分） -->
-                <div class="lg:col-span-2 space-y-6">
-                    <div class="bg-white rounded-xl shadow-sm p-6 border border-gray-200">
-                        <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
-                            <span class="text-2xl mr-2">🤖</span> AI アナリスト・インサイト
-                        </h3>
-                        
-                        <div class="mb-6">
-                            <h4 class="text-md font-semibold text-blue-800 bg-blue-50 px-3 py-1 rounded mb-3 inline-block">当期の業績・財務の実態</h4>
-                            <div id="aiTab1" class="ai-text text-gray-700 leading-relaxed space-y-2 text-sm whitespace-pre-wrap"></div>
-                        </div>
+            <div class="card">
+                <h2>🤖 AI アナリスト総合評価</h2>
+                
+                <h3>【業績・財務の実態】</h3>
+                <pre id="aiTab1"></pre>
+                
+                <h3>【来期の見通し・リスク】</h3>
+                <pre id="aiTab2"></pre>
+            </div>
 
-                        <hr class="border-gray-100 mb-6">
-
-                        <div>
-                            <h4 class="text-md font-semibold text-purple-800 bg-purple-50 px-3 py-1 rounded mb-3 inline-block">来期の見通し・カタリストとリスク</h4>
-                            <div id="aiTab2" class="ai-text text-gray-700 leading-relaxed space-y-2 text-sm whitespace-pre-wrap"></div>
-                        </div>
-                    </div>
+            <div class="flex-container">
+                <div class="card flex-item">
+                    <h3>財務数値 (PL)</h3>
+                    <table>
+                        <tr><th id="lblSales">売上高</th><td id="valSales"></td></tr>
+                        <tr><th id="lblOpProfit">営業利益</th><td id="valOpProfit"></td></tr>
+                        <tr><th>純利益</th><td id="valNetProfit"></td></tr>
+                    </table>
                 </div>
 
-                <!-- 右側：主要KPIダッシュボード（1カラム分） -->
-                <div class="space-y-4">
-                    <!-- PL情報 -->
-                    <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-200">
-                        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">当期 損益状況 (百万円)</h4>
-                        
-                        <div class="mb-4">
-                            <p class="text-sm text-gray-600 mb-1" id="lblSales">売上高</p>
-                            <p class="text-2xl font-bold text-gray-900" id="valSales"></p>
-                        </div>
-                        <div class="mb-4">
-                            <p class="text-sm text-gray-600 mb-1" id="lblOpProfit">営業利益</p>
-                            <p class="text-2xl font-bold text-gray-900" id="valOpProfit"></p>
-                        </div>
-                        <div>
-                            <p class="text-sm text-gray-600 mb-1">純利益</p>
-                            <p class="text-2xl font-bold text-gray-900" id="valNetProfit"></p>
-                        </div>
-                    </div>
-
-                    <!-- 財務安全性 -->
-                    <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-200">
-                        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">財務安全性 (百万円)</h4>
-                        <div class="flex justify-between items-end mb-3">
-                            <div>
-                                <p class="text-sm text-gray-600 mb-1">総資産</p>
-                                <p class="text-xl font-bold text-gray-900" id="valAssets"></p>
-                            </div>
-                            <div class="text-right">
-                                <p class="text-sm text-gray-600 mb-1">純資産</p>
-                                <p class="text-xl font-bold text-gray-900" id="valEquity"></p>
-                            </div>
-                        </div>
-                        <!-- 自己資本比率バー -->
-                        <div class="mt-2">
-                            <div class="flex justify-between text-xs mb-1">
-                                <span class="font-medium text-gray-600">自己資本比率 (推定)</span>
-                                <span class="font-bold text-blue-600" id="valEquityRatio">%</span>
-                            </div>
-                            <div class="w-full bg-gray-200 rounded-full h-2">
-                                <div class="bg-blue-600 h-2 rounded-full" id="barEquityRatio" style="width: 0%"></div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- キャッシュフロー -->
-                    <div class="bg-white rounded-xl shadow-sm p-5 border border-gray-200">
-                        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">キャッシュフロー (百万円)</h4>
-                        <div class="space-y-2 text-sm">
-                            <div class="flex justify-between">
-                                <span class="text-gray-600">営業CF</span>
-                                <span class="font-bold text-gray-900" id="valCfOp"></span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-gray-600">投資CF</span>
-                                <span class="font-bold text-gray-900" id="valCfInv"></span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-gray-600">財務CF</span>
-                                <span class="font-bold text-gray-900" id="valCfFin"></span>
-                            </div>
-                        </div>
-                    </div>
+                <div class="card flex-item">
+                    <h3>財務数値 (BS/CF)</h3>
+                    <table>
+                        <tr><th>総資産</th><td id="valAssets"></td></tr>
+                        <tr><th>純資産</th><td id="valEquity"></td></tr>
+                        <tr><th>営業CF</th><td id="valCfOp"></td></tr>
+                    </table>
                 </div>
             </div>
         </div>
-    </main>
+    </div>
 
     <script>
-        // Markdownの太字(**文字**)をHTMLの<strong>タグに変換する簡易関数
-        function parseMarkdownBold(text) {
-            if (!text) return "";
-            return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        }
-
-        // 数値をカンマ区切りにする関数
         function fmt(num) {
             if (num === null || num === undefined) return "-";
             return Number(num).toLocaleString();
         }
 
-        const uploadForm = document.getElementById('uploadForm');
-        const submitBtn = document.getElementById('submitBtn');
-        const loadingArea = document.getElementById('loadingArea');
-        const resultArea = document.getElementById('resultArea');
+        function parseMarkdown(text) {
+            if (!text) return "";
+            return text.replace(/\*\*(.*?)\*\*/g, '<span class="bold-text">$1</span>');
+        }
 
-        uploadForm.addEventListener('submit', async (e) => {
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            // UI状態の切り替え
-            submitBtn.disabled = true;
-            submitBtn.classList.add('opacity-50');
-            loadingArea.classList.remove('hidden');
-            resultArea.classList.add('hidden');
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('result').style.display = 'none';
             
             const formData = new FormData(e.target);
             
             try {
-                // 1. バックエンドにファイルを送信して Job ID を即座に受け取る
+                // アップロードしてJob IDを取得
                 const uploadRes = await fetch('/upload', { method: 'POST', body: formData });
                 
-                if (!uploadRes.ok) {
-                    throw new Error(`サーバーエラー: ${uploadRes.status}`);
-                }
+                if (!uploadRes.ok) throw new Error(`HTTPエラー: ${uploadRes.status}`);
                 
                 const uploadData = await uploadRes.json();
                 
-                if (!uploadData.success) {
-                    throw new Error(uploadData.error);
-                }
+                if (!uploadData.success) throw new Error(uploadData.error);
                 
-                const jobId = uploadData.job_id;
-                console.log("Job started with ID:", jobId);
-                
-                // 2. サーバーの処理状況を定期確認（ポーリング）する
-                pollStatus(jobId);
+                // ポーリング開始
+                pollStatus(uploadData.job_id);
                 
             } catch (error) {
-                console.error("通信エラー:", error);
+                console.error(error);
                 alert("エラーが発生しました: " + error.message);
-                resetUI();
+                document.getElementById('submitBtn').disabled = false;
+                document.getElementById('loading').style.display = 'none';
             }
         });
 
-        // 定期的にステータスを確認する関数（3秒間隔）
         async function pollStatus(jobId) {
             try {
                 const res = await fetch(`/status/${jobId}`);
                 const result = await res.json();
                 
                 if (result.status === 'processing') {
-                    // まだ処理中なら3秒後に再帰呼び出し
+                    // 3秒ごとに再確認
                     setTimeout(() => pollStatus(jobId), 3000);
                 } else if (result.status === 'done') {
-                    // 処理完了！画面にデータを描画
+                    // 処理完了
                     renderDashboard(result.data);
                 } else if (result.status === 'error') {
                     throw new Error(result.error);
                 }
             } catch (error) {
-                console.error("ポーリング中エラー:", error);
-                alert("解析中にエラーが発生しました: " + error.message);
-                resetUI();
+                console.error(error);
+                alert("解析エラー: " + error.message);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('submitBtn').disabled = false;
             }
         }
 
-        // 結果を画面に描画する関数
         function renderDashboard(data) {
-            // 基本情報
-            document.getElementById('resCompany').textContent = data.company || "不明な企業";
-            document.getElementById('resCode').textContent = data.code ? `(${data.code})` : "";
-            document.getElementById('resFiscalYear').textContent = data.fiscal_year || "";
+            document.getElementById('resCompany').textContent = data.company || "-";
+            document.getElementById('resCode').textContent = data.code || "-";
+            document.getElementById('resFiscalYear').textContent = data.fiscal_year || "-";
 
-            // AIインサイト (Markdownの太字を適用)
             if(data.ai_analysis) {
-                document.getElementById('aiTab1').innerHTML = parseMarkdownBold(data.ai_analysis.tab1_summary);
-                document.getElementById('aiTab2').innerHTML = parseMarkdownBold(data.ai_analysis.tab2_summary);
+                document.getElementById('aiTab1').innerHTML = parseMarkdown(data.ai_analysis.tab1_summary);
+                document.getElementById('aiTab2').innerHTML = parseMarkdown(data.ai_analysis.tab2_summary);
             }
 
-            // ラベルの適用
             if(data.labels) {
                 document.getElementById('lblSales').textContent = data.labels.sales || "売上高";
                 document.getElementById('lblOpProfit').textContent = data.labels.op_profit || "営業利益";
             }
 
-            // P/Lの数値
             document.getElementById('valSales').textContent = fmt(data.pl_sales_now);
             document.getElementById('valOpProfit').textContent = fmt(data.pl_op_profit_now);
             document.getElementById('valNetProfit').textContent = fmt(data.pl_net_profit_now);
 
-            // B/Sの数値
-            const assets = data.bs_total_assets_now || 0;
-            const equity = data.bs_equity || 0;
-            document.getElementById('valAssets').textContent = fmt(assets);
-            document.getElementById('valEquity').textContent = fmt(equity);
-
-            // 自己資本比率の計算とバーの更新
-            let ratio = 0;
-            if(assets > 0 && equity > 0) {
-                ratio = ((equity / assets) * 100).toFixed(1);
-            }
-            document.getElementById('valEquityRatio').textContent = `${ratio}%`;
-            document.getElementById('barEquityRatio').style.width = `${Math.min(ratio, 100)}%`;
-
-            // C/Fの数値
+            document.getElementById('valAssets').textContent = fmt(data.bs_total_assets_now);
+            document.getElementById('valEquity').textContent = fmt(data.bs_equity);
             document.getElementById('valCfOp').textContent = fmt(data.cf_operating);
-            document.getElementById('valCfInv').textContent = fmt(data.cf_investing);
-            document.getElementById('valCfFin').textContent = fmt(data.cf_financing);
 
-            // UI切り替え
-            loadingArea.classList.add('hidden');
-            resultArea.classList.remove('hidden');
-            submitBtn.disabled = false;
-            submitBtn.classList.remove('opacity-50');
-        }
-
-        function resetUI() {
-            loadingArea.classList.add('hidden');
-            submitBtn.disabled = false;
-            submitBtn.classList.remove('opacity-50');
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('submitBtn').disabled = false;
         }
     </script>
 </body>

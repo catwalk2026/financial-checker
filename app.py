@@ -36,16 +36,12 @@ def init_db():
 init_db()
 
 def clean_json_string(json_str):
-    # 生データからJSONブロックのみ抽出
     start_idx = json_str.find('{')
     end_idx = json_str.rfind('}')
     if start_idx != -1 and end_idx != -1:
         json_str = json_str[start_idx:end_idx+1]
     
-    # 🚨AIがやりがちな「最後の要素の後の不要なカンマ」を自動削除する（エラーの主原因）
     json_str = re.sub(r',\s*([\}\]])', r'\1', json_str)
-    
-    # 不完全な改行や制御文字の処理
     json_str = re.sub(r'[\x00-\x1F\x7F]', ' ', json_str)
     return json_str
 
@@ -58,7 +54,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
 
     with pdfplumber.open(tanshin_path) as pdf:
         for i, page in enumerate(pdf.pages):
-            # タイムアウト対策：短信は冒頭10ページまでに短縮
             if i >= 10:
                 break
             text = page.extract_text()
@@ -69,7 +64,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
         try:
             with pdfplumber.open(presentation_path) as pdf:
                 for i, page in enumerate(pdf.pages):
-                    # タイムアウト対策：説明資料は冒頭20ページまでに短縮
                     if i >= 20: 
                         break
                     text = page.extract_text()
@@ -144,7 +138,7 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     """
 
     response = client.models.generate_content(
-        model='gemini-3.6-flash',
+        model='gemini-2.5-flash',
         contents=prompt,
         config=genai.types.GenerateContentConfig(
             response_mime_type="application/json"
@@ -155,6 +149,11 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     cleaned_json_str = clean_json_string(raw_text)
 
     return json.loads(cleaned_json_str)
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    print(f"予期せぬエラー: {str(e)}")
+    return jsonify({'success': False, 'error': f"サーバー内部でエラーが発生しました: {str(e)}"}), 500
 
 @app.route('/')
 def index():

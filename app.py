@@ -8,6 +8,14 @@ import uuid
 from google import genai
 from flask import Flask, request, jsonify, send_file
 
+# 🚀 みんかぶスクレイピング用ライブラリ
+try:
+    import requests
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
+    print("WARNING: requests または beautifulsoup4 がインストールされていません。自動取得はスキップされます。")
+
 app = Flask(__name__)
 UPLOAD_FOLDER = './uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -56,7 +64,39 @@ def clean_json_string(json_str):
     json_str = re.sub(r'[\x00-\x1F\x7F]', ' ', json_str)
     return json_str
 
-# 🚀 コンセンサスの引数を追加
+# 🚀 「みんかぶ」からコンセンサスを抽出する関数
+def fetch_japan_consensus(code):
+    sales, op_profit = "", ""
+    if not BeautifulSoup:
+        return sales, op_profit
+        
+    try:
+        url = f"https://minkabu.jp/stock/{code}/consensus"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        res = requests.get(url, headers=headers, timeout=5)
+        
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            # テーブルの行を走査して「売上高」「営業利益」を探す
+            for tr in soup.find_all('tr'):
+                th = tr.find('th')
+                if th:
+                    th_text = th.get_text(strip=True)
+                    tds = tr.find_all('td')
+                    # みんかぶの構造： <th>項目</th> <td>会社予想</td> <td>コンセンサス</td>
+                    if "売上高" in th_text and len(tds) >= 2:
+                        val = tds[1].get_text(strip=True).replace(',', '')
+                        match = re.search(r'[-]?\d+', val)
+                        if match: sales = match.group(0)
+                    elif ("営業利益" in th_text or "営業益" in th_text) and len(tds) >= 2:
+                        val = tds[1].get_text(strip=True).replace(',', '')
+                        match = re.search(r'[-]?\d+', val)
+                        if match: op_profit = match.group(0)
+    except Exception as e:
+        print(f"みんかぶスクレイピングエラー: {e}")
+        
+    return sales, op_profit
+
 def parse_financial_pdf_smart(tanshin_path, presentation_path=None, consensus_sales="", consensus_op_profit=""):
     if not client:
         raise ValueError("サーバー側の設定エラー: GEMINI_API_KEY が設定されていません。")
@@ -72,6 +112,17 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None, consensus_sa
             if text:
                 all_text += f"--- 短信 Page {i+1} ---\n{text}\n\n"
 
+    # 🚀 PDF本文から証券コードを抽出し、みんかぶから自動取得
+    if not consensus_sales or not consensus_op_profit:
+        match = re.search(r'(?:証券コード|コード番号|コード)\s*[:：]?\s*(\d{4})', all_text[:2000])
+        if match:
+            code = match.group(1)
+            print(f"証券コード {code} を検出。「みんかぶ」からコンセンサスを自動検索します...")
+            auto_sales, auto_op_profit = fetch_japan_consensus(code)
+            # 手動入力が空欄だった場合のみ、自動取得した値で埋める
+            if not consensus_sales: consensus_sales = auto_sales
+            if not consensus_op_profit: consensus_op_profit = auto_op_profit
+
     if presentation_path:
         try:
             with pdfplumber.open(presentation_path) as pdf:
@@ -84,7 +135,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None, consensus_sa
         except Exception as e:
             print(f"決算説明資料の読み込みエラー: {e}")
 
-    # 🚀 AIへの指示にコンセンサス比較のミッションを追加
     prompt = f"""
     あなたはトップティア証券会社のシニア・エクイティアナリストです。提供された「決算短信」から財務数値を抽出し、指定のJSONフォーマットで出力してください。
 
@@ -102,7 +152,7 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None, consensus_sa
     【市場コンセンサス（参考データ）】
     - 売上高コンセンサス: {consensus_sales} 百万円
     - 営業利益コンセンサス: {consensus_op_profit} 百万円
-    ※コンセンサスの数値が入力されている場合、会社側の来期予想(forecast_data)と比較し、市場の期待を上回っているか（ポジティブサプライズ）、下回っているか（ネガティブ）を必ず分析に含めてください。
+    ※コンセンサスの数値が存在する場合、会社側の来期予想(forecast_data)と比較し、市場の期待を上回っているか（ポジティブサプライズ）、下回っているか（ネガティブ）を必ず分析に含めてください。
 
     【AIによる要約（ai_analysis）の極意：プロフェッショナル・インサイト】
     単なる事実の羅列は一切禁止します。
@@ -161,11 +211,15 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None, consensus_sa
     cleaned_json_str = clean_json_string(raw_text)
     data = json.loads(cleaned_json_str)
 
-    # ユーザー入力のコンセンサス数値をJSONに上書き（グラフ描画用）
-    if consensus_sales.isdigit():
-        data['consensus_data']['sales'] = int(consensus_sales)
-    if consensus_op_profit.isdigit():
-        data['consensus_data']['op_profit'] = int(consensus_op_profit)
+    # 取得できたコンセンサス数値をJSONへ安全に格納（グラフ描画用）
+    try:
+        if consensus_sales: data['consensus_data']['sales'] = int(consensus_sales)
+    except ValueError:
+        pass
+    try:
+        if consensus_op_profit: data['consensus_data']['op_profit'] = int(consensus_op_profit)
+    except ValueError:
+        pass
 
     return data
 
@@ -200,7 +254,6 @@ def upload_file():
     tanshin_file = request.files['tanshin']
     presentation_file = request.files.get('presentation')
     
-    # 🚀 フォームからコンセンサスの値を受け取る
     consensus_sales = request.form.get('consensus_sales', '').strip()
     consensus_op_profit = request.form.get('consensus_op_profit', '').strip()
 
@@ -220,7 +273,6 @@ def upload_file():
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("INSERT INTO jobs (id, status) VALUES (?, ?)", (job_id, 'processing'))
 
-    # 引数にコンセンサスを追加してスレッド起動
     thread = threading.Thread(target=run_analysis_job, args=(job_id, tanshin_path, presentation_path, consensus_sales, consensus_op_profit))
     thread.start()
 

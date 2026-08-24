@@ -23,6 +23,7 @@
                         mint: { main: '#42B187', base: '#60D5A9' },
                         accentyellow: { main: '#C4BF4D', base: '#E5EB67' },
                         ivory: { main: '#CBC2B3', base: '#F8F6ED' },
+                        violet: '#8564BE', /* コンセンサス用カラー追加 */
                         blue: '#4984BD'
                     },
                     fontFamily: {
@@ -45,7 +46,6 @@
 </head>
 <body class="font-sans min-h-screen">
 
-    <!-- ヘッダー -->
     <header class="bg-white border-b border-lightborder px-6 py-4 shadow-sm">
         <div class="max-w-6xl mx-auto flex items-center">
             <h1 class="text-xl font-bold text-primary-main tracking-widest">AI FINANCIAL ANALYST</h1>
@@ -57,21 +57,42 @@
         <!-- アップロードフォーム -->
         <section class="card p-8 mb-10">
             <h2 class="text-xl font-bold text-textblack mb-6">決算資料のアップロード ✨</h2>
-            <form id="uploadForm" class="flex flex-col md:flex-row gap-6 items-end">
-                <div class="flex-1 w-full">
-                    <label class="block text-sm font-bold text-stone mb-2">📄 決算短信 (PDF) <span class="text-accentorange text-xs ml-1">*必須</span></label>
-                    <input type="file" name="tanshin" accept=".pdf" required
-                        class="block w-full text-sm text-stone file:mr-4 file:py-3 file:px-6 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-primary-base file:text-white hover:file:bg-primary-main border border-lightborder rounded-full p-1 cursor-pointer transition-colors">
+            <form id="uploadForm" class="flex flex-col gap-6">
+                <div class="flex flex-col md:flex-row gap-6 items-end">
+                    <div class="flex-1 w-full">
+                        <label class="block text-sm font-bold text-stone mb-2">📄 決算短信 (PDF) <span class="text-accentorange text-xs ml-1">*必須</span></label>
+                        <input type="file" name="tanshin" accept=".pdf" required
+                            class="block w-full text-sm text-stone file:mr-4 file:py-3 file:px-6 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-primary-base file:text-white hover:file:bg-primary-main border border-lightborder rounded-full p-1 cursor-pointer transition-colors">
+                    </div>
+                    <div class="flex-1 w-full">
+                        <label class="block text-sm font-bold text-stone mb-2">📊 決算説明資料 (PDF) <span class="text-ivory-main text-xs ml-1">任意</span></label>
+                        <input type="file" name="presentation" accept=".pdf"
+                            class="block w-full text-sm text-stone file:mr-4 file:py-3 file:px-6 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-ivory-base file:text-stone hover:file:bg-gray-200 border border-lightborder rounded-full p-1 cursor-pointer transition-colors">
+                    </div>
                 </div>
-                <div class="flex-1 w-full">
-                    <label class="block text-sm font-bold text-stone mb-2">📊 決算説明資料 (PDF) <span class="text-ivory-main text-xs ml-1">任意</span></label>
-                    <input type="file" name="presentation" accept=".pdf"
-                        class="block w-full text-sm text-stone file:mr-4 file:py-3 file:px-6 file:rounded-full file:border-0 file:text-sm file:font-bold file:bg-ivory-base file:text-stone hover:file:bg-gray-200 border border-lightborder rounded-full p-1 cursor-pointer transition-colors">
+                
+                <!-- 🚀 コンセンサス入力欄 -->
+                <div class="bg-ivory-base bg-opacity-30 p-4 rounded-xl border border-lightborder">
+                    <label class="block text-sm font-bold text-stone mb-3">📈 市場コンセンサス予想 (百万円) <span class="text-ivory-main text-xs ml-1">※任意</span></label>
+                    <div class="flex flex-col md:flex-row gap-4">
+                        <div class="flex-1">
+                            <input type="number" name="consensus_sales" placeholder="売上高 コンセンサスを入力..." 
+                                class="w-full text-sm p-3 rounded-md border border-lightborder focus:outline-none focus:border-primary-main">
+                        </div>
+                        <div class="flex-1">
+                            <input type="number" name="consensus_op_profit" placeholder="営業利益 コンセンサスを入力..." 
+                                class="w-full text-sm p-3 rounded-md border border-lightborder focus:outline-none focus:border-primary-main">
+                        </div>
+                    </div>
+                    <p class="text-xs text-stone mt-2">※数値を入力すると、AIが会社予想と比較しサプライズ分析を行います。</p>
                 </div>
-                <button type="submit" id="submitBtn" 
-                    class="bg-primary-main hover:opacity-90 text-white font-bold py-3.5 px-10 rounded-full transition-all w-full md:w-auto shadow-md transform hover:-translate-y-0.5">
-                    解析スタート
-                </button>
+
+                <div class="text-center mt-2">
+                    <button type="submit" id="submitBtn" 
+                        class="bg-primary-main hover:opacity-90 text-white font-bold py-3.5 px-16 rounded-full transition-all shadow-md transform hover:-translate-y-0.5">
+                        解析スタート
+                    </button>
+                </div>
             </form>
         </section>
 
@@ -115,7 +136,7 @@
                     <!-- グラフエリア (P/L & B/S) -->
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div class="card p-6">
-                            <h4 class="text-sm font-bold text-stone mb-4 text-center">業績推移と来期予想 (P/L)</h4>
+                            <h4 class="text-sm font-bold text-stone mb-4 text-center">業績推移と市場予想 (P/L)</h4>
                             <canvas id="plChart"></canvas>
                         </div>
                         <div class="card p-6">
@@ -195,7 +216,7 @@
         }
 
         function fmt(num) {
-            if (num === null || num === undefined) return "-";
+            if (num === null || num === undefined || num === 0) return "-";
             return Number(num).toLocaleString();
         }
 
@@ -299,16 +320,33 @@
             const forecastSales = data.forecast_data ? data.forecast_data.sales : 0;
             const forecastOpProfit = data.forecast_data ? data.forecast_data.op_profit : 0;
             const forecastNetProfit = data.forecast_data ? data.forecast_data.net_profit : 0;
+            
+            // 🚀 コンセンサスのデータ取得
+            const consensusSales = data.consensus_data ? data.consensus_data.sales : 0;
+            const consensusOpProfit = data.consensus_data ? data.consensus_data.op_profit : 0;
+
+            // グラフのデータセット構築
+            const plDatasets = [
+                { label: '前期', data: [data.pl_sales_prev, data.pl_op_profit_prev, data.pl_net_profit_prev], backgroundColor: '#CBC2B3', borderRadius: 4 },
+                { label: '当期', data: [data.pl_sales_now, data.pl_op_profit_now, data.pl_net_profit_now], backgroundColor: '#25B2C7', borderRadius: 4 },
+                { label: '来期(会社予想)', data: [forecastSales, forecastOpProfit, forecastNetProfit], backgroundColor: '#F77261', borderRadius: 4 }
+            ];
+
+            // ユーザーがコンセンサスを入力していた場合のみ表示
+            if (consensusSales > 0 || consensusOpProfit > 0) {
+                plDatasets.push({
+                    label: '市場予想(ｺﾝｾﾝｻｽ)', 
+                    data: [consensusSales, consensusOpProfit, 0], // 純利益コンセンサスは未入力前提のため0
+                    backgroundColor: '#8564BE', // Violet (拡張カラー)
+                    borderRadius: 4
+                });
+            }
 
             plChartInstance = new Chart(ctxPl, {
                 type: 'bar',
                 data: {
                     labels: ['売上高', '営業利益', '純利益'],
-                    datasets: [
-                        { label: '前期', data: [data.pl_sales_prev, data.pl_op_profit_prev, data.pl_net_profit_prev], backgroundColor: '#CBC2B3', borderRadius: 4 },
-                        { label: '当期', data: [data.pl_sales_now, data.pl_op_profit_now, data.pl_net_profit_now], backgroundColor: '#25B2C7', borderRadius: 4 },
-                        { label: '来期(予想)', data: [forecastSales, forecastOpProfit, forecastNetProfit], backgroundColor: '#F77261', borderRadius: 4 }
-                    ]
+                    datasets: plDatasets
                 },
                 options: { responsive: true, plugins: { legend: { position: 'top' } } }
             });
@@ -316,36 +354,22 @@
             if (bsChartInstance) bsChartInstance.destroy();
             const ctxBs = document.getElementById('bsChart').getContext('2d');
             
-            // 下から上に積み上げるためのデータセット順序
             bsChartInstance = new Chart(ctxBs, {
                 type: 'bar',
                 data: {
                     labels: ['前期 資産', '前期 負債/純資産', '当期 資産', '当期 負債/純資産'],
                     datasets: [
-                        // --- 負債・純資産の部（一番下） ---
                         { label: '純資産', data: [0, data.bs_equity_prev, 0, data.bs_equity], backgroundColor: '#F77261' },
-                        // --- 負債・純資産の部（真ん中） ---
                         { label: '固定負債', data: [0, data.bs_fixed_liabilities_prev, 0, data.bs_fixed_liabilities], backgroundColor: '#C4BF4D' },
-                        // --- 負債・純資産の部（一番上） ---
                         { label: '流動負債', data: [0, data.bs_current_liabilities_prev, 0, data.bs_current_liabilities], backgroundColor: '#42B187' },
-                        // --- 資産の部（下） ---
                         { label: '固定資産', data: [data.bs_fixed_assets_prev, 0, data.bs_fixed_assets, 0], backgroundColor: '#4984BD' },
-                        // --- 資産の部（上） ---
                         { label: '流動資産', data: [data.bs_current_assets_prev, 0, data.bs_current_assets, 0], backgroundColor: '#25B2C7' }
                     ]
                 },
                 options: {
                     responsive: true,
-                    scales: { 
-                        x: { stacked: true }, 
-                        y: { stacked: true } 
-                    },
-                    plugins: { 
-                        legend: { 
-                            position: 'top',
-                            reverse: true // これで凡例の並びも「上から流動→固定」の順になります
-                        } 
-                    }
+                    scales: { x: { stacked: true }, y: { stacked: true } },
+                    plugins: { legend: { position: 'top', reverse: true } }
                 }
             });
 

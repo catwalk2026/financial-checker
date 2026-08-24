@@ -8,13 +8,13 @@ import uuid
 from google import genai
 from flask import Flask, request, jsonify, send_file
 
-# 🚀 みんかぶスクレイピング用ライブラリ
+# 🚀 スクレイピング用ライブラリ
 try:
     import requests
     from bs4 import BeautifulSoup
 except ImportError:
     BeautifulSoup = None
-    print("WARNING: requests または beautifulsoup4 がインストールされていません。自動取得はスキップされます。")
+    print("WARNING: requests または beautifulsoup4 がインストールされていません。")
 
 app = Flask(__name__)
 UPLOAD_FOLDER = './uploads'
@@ -64,37 +64,68 @@ def clean_json_string(json_str):
     json_str = re.sub(r'[\x00-\x1F\x7F]', ' ', json_str)
     return json_str
 
-# 🚀 「みんかぶ」からコンセンサスを抽出する関数
+# 🚀 【超強化版】コンセンサス自動取得機能（みんかぶ → IFIS の二段構え）
 def fetch_japan_consensus(code):
     sales, op_profit = "", ""
     if not BeautifulSoup:
+        print("❌ BeautifulSoupがないため自動取得をスキップします。requirements.txtを確認してください。")
         return sales, op_profit
         
+    # ロボット判定を回避するための強力な偽装ヘッダー
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+    }
+    
+    # ターゲット1: みんかぶ
     try:
         url = f"https://minkabu.jp/stock/{code}/consensus"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         res = requests.get(url, headers=headers, timeout=5)
-        
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
-            # テーブルの行を走査して「売上高」「営業利益」を探す
             for tr in soup.find_all('tr'):
                 th = tr.find('th')
                 if th:
                     th_text = th.get_text(strip=True)
                     tds = tr.find_all('td')
-                    # みんかぶの構造： <th>項目</th> <td>会社予想</td> <td>コンセンサス</td>
                     if "売上高" in th_text and len(tds) >= 2:
                         val = tds[1].get_text(strip=True).replace(',', '')
                         match = re.search(r'[-]?\d+', val)
-                        if match: sales = match.group(0)
+                        if match and not sales: sales = match.group(0)
                     elif ("営業利益" in th_text or "営業益" in th_text) and len(tds) >= 2:
                         val = tds[1].get_text(strip=True).replace(',', '')
                         match = re.search(r'[-]?\d+', val)
-                        if match: op_profit = match.group(0)
+                        if match and not op_profit: op_profit = match.group(0)
+            print(f"✅ みんかぶ抽出完了: 売上={sales}, 営利={op_profit}")
     except Exception as e:
-        print(f"みんかぶスクレイピングエラー: {e}")
-        
+        print(f"⚠️ みんかぶエラー: {e}")
+
+    # ターゲット2: みんかぶで取れなかった場合は IFIS（株予報）へアタック
+    if not sales or not op_profit:
+        print("⚠️ みんかぶで取得できなかったため、IFIS(株予報)へアクセスします...")
+        try:
+            url_ifis = f"https://kabuyoho.ifis.co.jp/index.php?action=tp1&sa=report_con&bcode={code}"
+            res = requests.get(url_ifis, headers=headers, timeout=5)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, 'html.parser')
+                for tr in soup.find_all('tr'):
+                    th = tr.find('th')
+                    if th:
+                        th_text = th.get_text(strip=True)
+                        tds = tr.find_all('td')
+                        if "売上高" in th_text and len(tds) >= 2:
+                            val = tds[1].get_text(strip=True).replace(',', '')
+                            match = re.search(r'[-]?\d+', val)
+                            if match and not sales: sales = match.group(0)
+                        elif "営業利益" in th_text and len(tds) >= 2:
+                            val = tds[1].get_text(strip=True).replace(',', '')
+                            match = re.search(r'[-]?\d+', val)
+                            if match and not op_profit: op_profit = match.group(0)
+                print(f"✅ IFIS抽出完了: 売上={sales}, 営利={op_profit}")
+        except Exception as e:
+            print(f"⚠️ IFISエラー: {e}")
+
     return sales, op_profit
 
 def parse_financial_pdf_smart(tanshin_path, presentation_path=None, consensus_sales="", consensus_op_profit=""):
@@ -112,14 +143,13 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None, consensus_sa
             if text:
                 all_text += f"--- 短信 Page {i+1} ---\n{text}\n\n"
 
-    # 🚀 PDF本文から証券コードを抽出し、みんかぶから自動取得
+    # 🚀 自動取得ロジックの呼び出し
     if not consensus_sales or not consensus_op_profit:
         match = re.search(r'(?:証券コード|コード番号|コード)\s*[:：]?\s*(\d{4})', all_text[:2000])
         if match:
             code = match.group(1)
-            print(f"証券コード {code} を検出。「みんかぶ」からコンセンサスを自動検索します...")
+            print(f"🔍 証券コード {code} を検出。コンセンサスを自動取得します...")
             auto_sales, auto_op_profit = fetch_japan_consensus(code)
-            # 手動入力が空欄だった場合のみ、自動取得した値で埋める
             if not consensus_sales: consensus_sales = auto_sales
             if not consensus_op_profit: consensus_op_profit = auto_op_profit
 
@@ -140,14 +170,13 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None, consensus_sa
 
     【抽出ルール（絶対厳守）】
     - 🚨指定のJSONフォーマットのみを返すこと。JSONの最後の要素には絶対にカンマ(,)をつけないでください。
-    - JSONのキーや値の中でダブルクォーテーション(")を使う場合は、必ずエスケープ(\\")してください。
+    - JSONのキーや値の中でダブルクォーテーション(")を使う場合は、エスケープしてください。
     - 単位はすべて「百万円」に換算・統一してください（例: テキストが「円」や「十億円」なら百万円に変換）。
-    - 損失や減少などのマイナス値はマイナスの数値（例: -100）としてください。
+    - マイナス値はマイナスの数値（例: -100）としてください。
 
     【超重要：B/S（貸借対照表）の負債・純資産の抽出について】
-    - 「流動資産」「固定資産(非流動資産)」「流動負債」「固定負債(非流動負債)」は、必ずそれぞれの「合計値」を抽出してください。
-    - 🚨【絶対厳守】いかなる場合も、負債の項目を理由なく0にしないでください。
-    - 🚨【絶対厳守】純資産（資本合計）は、必ずB/S表の最後にある「純資産合計」（IFRSの場合は資本合計）の数値を抽出してください。「自己資本」ではありません。
+    - 🚨負債の項目を理由なく0にしないでください。
+    - 🚨純資産は、必ずB/S表の最後にある「純資産合計」（IFRSの場合は資本合計）の数値を抽出してください。「自己資本」ではありません。
 
     【市場コンセンサス（参考データ）】
     - 売上高コンセンサス: {consensus_sales} 百万円
@@ -211,7 +240,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None, consensus_sa
     cleaned_json_str = clean_json_string(raw_text)
     data = json.loads(cleaned_json_str)
 
-    # 取得できたコンセンサス数値をJSONへ安全に格納（グラフ描画用）
     try:
         if consensus_sales: data['consensus_data']['sales'] = int(consensus_sales)
     except ValueError:

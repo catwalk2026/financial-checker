@@ -95,7 +95,7 @@
 
             <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
                 
-                <!-- 左側：AIインサイト（2カラム） -->
+                <!-- 左側：AIインサイト -->
                 <div class="xl:col-span-2 space-y-8">
                     <div class="card p-8">
                         <h3 class="text-xl font-bold text-textblack mb-6 border-b border-lightborder pb-3 flex items-center">
@@ -114,12 +114,10 @@
 
                     <!-- グラフエリア (P/L & B/S) -->
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <!-- P/L グラフ -->
                         <div class="card p-6">
                             <h4 class="text-sm font-bold text-stone mb-4 text-center">業績推移と来期予想 (P/L)</h4>
                             <canvas id="plChart"></canvas>
                         </div>
-                        <!-- B/S グラフ -->
                         <div class="card p-6">
                             <h4 class="text-sm font-bold text-stone mb-4 text-center">財務構造 (B/S)</h4>
                             <canvas id="bsChart"></canvas>
@@ -127,9 +125,8 @@
                     </div>
                 </div>
 
-                <!-- 右側：主要KPIダッシュボード（1カラム） -->
+                <!-- 右側：主要KPIダッシュボード -->
                 <div class="space-y-6">
-                    <!-- PL情報 -->
                     <div class="card p-6">
                         <h4 class="text-xs font-bold text-stone uppercase tracking-wider mb-4 border-b border-lightborder pb-2">当期 損益状況 (百万円)</h4>
                         <div class="mb-5">
@@ -146,7 +143,6 @@
                         </div>
                     </div>
 
-                    <!-- 財務安全性 -->
                     <div class="card p-6">
                         <h4 class="text-xs font-bold text-stone uppercase tracking-wider mb-4 border-b border-lightborder pb-2">財務安全性 (百万円)</h4>
                         <div class="flex justify-between items-end mb-4">
@@ -170,7 +166,6 @@
                         </div>
                     </div>
 
-                    <!-- キャッシュフロー -->
                     <div class="card p-6">
                         <h4 class="text-xs font-bold text-stone uppercase tracking-wider mb-4 border-b border-lightborder pb-2">キャッシュフロー (百万円)</h4>
                         <div class="space-y-3 text-sm">
@@ -194,13 +189,11 @@
     </main>
 
     <script>
-        // Markdownの太字を変換
         function parseMarkdownBold(text) {
             if (!text) return "";
             return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         }
 
-        // カンマ区切り
         function fmt(num) {
             if (num === null || num === undefined) return "-";
             return Number(num).toLocaleString();
@@ -239,10 +232,15 @@
             }
         });
 
+        // 🚀 不正なステータスを正しくキャッチしてクルクルを止める処理
         async function pollStatus(jobId) {
             try {
                 const res = await fetch(`/status/${jobId}`);
                 const result = await res.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || "ジョブの取得に失敗しました");
+                }
                 
                 if (result.status === 'processing') {
                     setTimeout(() => pollStatus(jobId), 3000);
@@ -250,6 +248,8 @@
                     renderDashboard(result.data);
                 } else if (result.status === 'error') {
                     throw new Error(result.error);
+                } else {
+                    throw new Error("不明なステータスです");
                 }
             } catch (error) {
                 console.error("ポーリング中エラー:", error);
@@ -259,24 +259,20 @@
         }
 
         function renderDashboard(data) {
-            // 基本情報
             document.getElementById('resCompany').textContent = data.company || "不明な企業";
             document.getElementById('resCode').textContent = data.code ? `(${data.code})` : "";
             document.getElementById('resFiscalYear').textContent = data.fiscal_year || "";
 
-            // AIインサイト
             if(data.ai_analysis) {
                 document.getElementById('aiTab1').innerHTML = parseMarkdownBold(data.ai_analysis.tab1_summary);
                 document.getElementById('aiTab2').innerHTML = parseMarkdownBold(data.ai_analysis.tab2_summary);
             }
 
-            // ラベル
             if(data.labels) {
                 document.getElementById('lblSales').textContent = data.labels.sales || "売上高";
                 document.getElementById('lblOpProfit').textContent = data.labels.op_profit || "営業利益";
             }
 
-            // 右側の数値群
             document.getElementById('valSales').textContent = fmt(data.pl_sales_now);
             document.getElementById('valOpProfit').textContent = fmt(data.pl_op_profit_now);
             document.getElementById('valNetProfit').textContent = fmt(data.pl_net_profit_now);
@@ -295,13 +291,9 @@
             document.getElementById('valCfInv').textContent = fmt(data.cf_investing);
             document.getElementById('valCfFin').textContent = fmt(data.cf_financing);
 
-            // ==========================================
-            // 📊 グラフの描画 (Chart.js)
-            // ==========================================
             Chart.defaults.font.family = '"Noto Sans JP", sans-serif';
-            Chart.defaults.color = '#596572'; // Stone
+            Chart.defaults.color = '#596572';
 
-            // 1. P/L グラフ (棒グラフ)
             if (plChartInstance) plChartInstance.destroy();
             const ctxPl = document.getElementById('plChart').getContext('2d');
             
@@ -314,82 +306,36 @@
                 data: {
                     labels: ['売上高', '営業利益', '純利益'],
                     datasets: [
-                        {
-                            label: '前期',
-                            data: [data.pl_sales_prev, data.pl_op_profit_prev, data.pl_net_profit_prev],
-                            backgroundColor: '#CBC2B3', // Ivory Main
-                            borderRadius: 4
-                        },
-                        {
-                            label: '当期',
-                            data: [data.pl_sales_now, data.pl_op_profit_now, data.pl_net_profit_now],
-                            backgroundColor: '#25B2C7', // Turquoise Main
-                            borderRadius: 4
-                        },
-                        {
-                            label: '来期(予想)',
-                            data: [forecastSales, forecastOpProfit, forecastNetProfit],
-                            backgroundColor: '#F77261', // AccentOrange
-                            borderRadius: 4
-                        }
+                        { label: '前期', data: [data.pl_sales_prev, data.pl_op_profit_prev, data.pl_net_profit_prev], backgroundColor: '#CBC2B3', borderRadius: 4 },
+                        { label: '当期', data: [data.pl_sales_now, data.pl_op_profit_now, data.pl_net_profit_now], backgroundColor: '#25B2C7', borderRadius: 4 },
+                        { label: '来期(予想)', data: [forecastSales, forecastOpProfit, forecastNetProfit], backgroundColor: '#F77261', borderRadius: 4 }
                     ]
                 },
-                options: {
-                    responsive: true,
-                    plugins: { legend: { position: 'top' } }
-                }
+                options: { responsive: true, plugins: { legend: { position: 'top' } } }
             });
 
-            // 2. B/S グラフ (積み上げ棒グラフ) - 修正版
             if (bsChartInstance) bsChartInstance.destroy();
             const ctxBs = document.getElementById('bsChart').getContext('2d');
             
-            // 下から上に順番に積み上がるようにデータセットを再構築・色分離
             bsChartInstance = new Chart(ctxBs, {
                 type: 'bar',
                 data: {
                     labels: ['前期 資産', '前期 負債/純資産', '当期 資産', '当期 負債/純資産'],
                     datasets: [
-                        // --- 資産の部 ---
-                        {
-                            label: '流動資産',
-                            data: [data.bs_current_assets_prev, 0, data.bs_current_assets, 0],
-                            backgroundColor: '#25B2C7' // Turquoise Main
-                        },
-                        {
-                            label: '固定資産',
-                            data: [data.bs_fixed_assets_prev, 0, data.bs_fixed_assets, 0],
-                            backgroundColor: '#4984BD' // Blue
-                        },
-                        // --- 負債・純資産の部 ---
-                        {
-                            label: '流動負債',
-                            data: [0, data.bs_current_liabilities_prev, 0, data.bs_current_liabilities],
-                            backgroundColor: '#42B187' // Mint Main
-                        },
-                        {
-                            label: '固定負債',
-                            data: [0, data.bs_fixed_liabilities_prev, 0, data.bs_fixed_liabilities],
-                            backgroundColor: '#C4BF4D' // AccentYellow Main
-                        },
-                        {
-                            label: '純資産',
-                            data: [0, data.bs_equity_prev, 0, data.bs_equity],
-                            backgroundColor: '#F77261' // AccentOrange
-                        }
+                        { label: '流動資産', data: [data.bs_current_assets_prev, 0, data.bs_current_assets, 0], backgroundColor: '#25B2C7' },
+                        { label: '固定資産', data: [data.bs_fixed_assets_prev, 0, data.bs_fixed_assets, 0], backgroundColor: '#4984BD' },
+                        { label: '流動負債', data: [0, data.bs_current_liabilities_prev, 0, data.bs_current_liabilities], backgroundColor: '#42B187' },
+                        { label: '固定負債', data: [0, data.bs_fixed_liabilities_prev, 0, data.bs_fixed_liabilities], backgroundColor: '#C4BF4D' },
+                        { label: '純資産', data: [0, data.bs_equity_prev, 0, data.bs_equity], backgroundColor: '#F77261' }
                     ]
                 },
                 options: {
                     responsive: true,
-                    scales: {
-                        x: { stacked: true },
-                        y: { stacked: true }
-                    },
+                    scales: { x: { stacked: true }, y: { stacked: true } },
                     plugins: { legend: { position: 'top' } }
                 }
             });
 
-            // UI切り替え
             loadingArea.classList.add('hidden');
             resultArea.classList.remove('hidden');
             submitBtn.disabled = false;

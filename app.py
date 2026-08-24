@@ -23,11 +23,9 @@ else:
 
 DB_PATH = 'finance_data.db'
 
-# 非同期処理用のジョブ管理辞書
-jobs = {}
-
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
+        # レポート保存用テーブル
         conn.execute('''
             CREATE TABLE IF NOT EXISTS reports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,6 +33,16 @@ def init_db():
                 code TEXT,
                 fiscal_year TEXT,
                 data_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        # 🚀 ジョブの進行状況を管理するテーブル（メモリ消滅対策）
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                status TEXT,
+                data_json TEXT,
+                error_msg TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -140,7 +148,6 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     }}
     """
 
-    # 正しいモデル名を指定
     response = client.models.generate_content(
         model='gemini-3.6-flash',
         contents=prompt,
@@ -154,20 +161,23 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
 
     return json.loads(cleaned_json_str)
 
+# 🚀 状態をDBに保存するように変更
 def run_analysis_job(job_id, tanshin_path, presentation_path):
     try:
         data = parse_financial_pdf_smart(tanshin_path, presentation_path)
         with sqlite3.connect(DB_PATH) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
+            # 過去レポの保存
+            conn.execute('''
                 INSERT INTO reports (company_name, code, fiscal_year, data_json)
                 VALUES (?, ?, ?, ?)
             ''', (data.get('company'), data.get('code'), data.get('fiscal_year'), json.dumps(data, ensure_ascii=False)))
-        jobs[job_id] = {"status": "done", "data": data}
+            # ジョブステータスの更新
+            conn.execute("UPDATE jobs SET status = 'done', data_json = ? WHERE id = ?", (json.dumps(data, ensure_ascii=False), job_id))
     except Exception as e:
         error_msg = str(e)
         print(f"解析エラー: {error_msg}")
-        jobs[job_id] = {"status": "error", "error": error_msg}
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("UPDATE jobs SET status = 'error', error_msg = ? WHERE id = ?", (error_msg, job_id))
 
 @app.errorhandler(Exception)
 def handle_exception(e):
@@ -197,7 +207,11 @@ def upload_file():
         presentation_file.save(presentation_path)
 
     job_id = str(uuid.uuid4())
-    jobs[job_id] = {"status": "processing"}
+    
+    # 🚀 ジョブ作成時にDBへ書き込む
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("INSERT INTO jobs (id, status) VALUES (?, ?)", (job_id, 'processing'))
+
     thread = threading.Thread(target=run_analysis_job, args=(job_id, tanshin_path, presentation_path))
     thread.start()
 
@@ -205,10 +219,22 @@ def upload_file():
 
 @app.route('/status/<job_id>', methods=['GET'])
 def check_status(job_id):
-    job = jobs.get(job_id)
-    if not job:
+    # 🚀 DBから状態を取得する
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT status, data_json, error_msg FROM jobs WHERE id = ?", (job_id,))
+        row = cursor.fetchone()
+        
+    if not row:
         return jsonify({'success': False, 'error': 'ジョブが見つかりません'}), 404
-    return jsonify({'success': True, **job})
+        
+    status, data_json, error_msg = row
+    if status == 'done':
+        return jsonify({'success': True, 'status': status, 'data': json.loads(data_json)})
+    elif status == 'error':
+        return jsonify({'success': True, 'status': status, 'error': error_msg})
+    else:
+        return jsonify({'success': True, 'status': status})
 
 @app.route('/search_companies', methods=['GET'])
 def search_companies():

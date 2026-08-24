@@ -22,7 +22,8 @@
                         lightborder: '#F7F7F8',
                         mint: { main: '#42B187', base: '#60D5A9' },
                         accentyellow: { main: '#C4BF4D', base: '#E5EB67' },
-                        ivory: { main: '#CBC2B3', base: '#F8F6ED' }
+                        ivory: { main: '#CBC2B3', base: '#F8F6ED' },
+                        blue: '#4984BD'
                     },
                     fontFamily: {
                         sans: ['"Noto Sans JP"', 'sans-serif'],
@@ -300,11 +301,10 @@
             Chart.defaults.font.family = '"Noto Sans JP", sans-serif';
             Chart.defaults.color = '#596572'; // Stone
 
-            // 1. P/L グラフ (棒グラフ) - 来期予想を追加！
+            // 1. P/L グラフ (棒グラフ)
             if (plChartInstance) plChartInstance.destroy();
             const ctxPl = document.getElementById('plChart').getContext('2d');
             
-            // 来期予想データの安全な取得
             const forecastSales = data.forecast_data ? data.forecast_data.sales : 0;
             const forecastOpProfit = data.forecast_data ? data.forecast_data.op_profit : 0;
             const forecastNetProfit = data.forecast_data ? data.forecast_data.net_profit : 0;
@@ -329,7 +329,7 @@
                         {
                             label: '来期(予想)',
                             data: [forecastSales, forecastOpProfit, forecastNetProfit],
-                            backgroundColor: '#F77261', // AccentOrange (目立たせる色)
+                            backgroundColor: '#F77261', // AccentOrange
                             borderRadius: 4
                         }
                     ]
@@ -340,22 +340,36 @@
                 }
             });
 
-            // 2. B/S グラフ (積み上げ棒グラフ)
+            // 2. B/S グラフ (積み上げ棒グラフ) - 修正版
             if (bsChartInstance) bsChartInstance.destroy();
             const ctxBs = document.getElementById('bsChart').getContext('2d');
+            
+            // 下から上に順番に積み上がるようにデータセットを再構築・色分離
             bsChartInstance = new Chart(ctxBs, {
                 type: 'bar',
                 data: {
                     labels: ['前期 資産', '前期 負債/純資産', '当期 資産', '当期 負債/純資産'],
                     datasets: [
+                        // --- 資産の部 ---
                         {
-                            label: '流動',
-                            data: [data.bs_current_assets_prev, data.bs_current_liabilities_prev, data.bs_current_assets, data.bs_current_liabilities],
+                            label: '流動資産',
+                            data: [data.bs_current_assets_prev, 0, data.bs_current_assets, 0],
+                            backgroundColor: '#25B2C7' // Turquoise Main
+                        },
+                        {
+                            label: '固定資産',
+                            data: [data.bs_fixed_assets_prev, 0, data.bs_fixed_assets, 0],
+                            backgroundColor: '#4984BD' // Blue
+                        },
+                        // --- 負債・純資産の部 ---
+                        {
+                            label: '流動負債',
+                            data: [0, data.bs_current_liabilities_prev, 0, data.bs_current_liabilities],
                             backgroundColor: '#42B187' // Mint Main
                         },
                         {
-                            label: '固定',
-                            data: [data.bs_fixed_assets_prev, data.bs_fixed_liabilities_prev, data.bs_fixed_assets, data.bs_fixed_liabilities],
+                            label: '固定負債',
+                            data: [0, data.bs_fixed_liabilities_prev, 0, data.bs_fixed_liabilities],
                             backgroundColor: '#C4BF4D' // AccentYellow Main
                         },
                         {

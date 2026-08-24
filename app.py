@@ -25,7 +25,6 @@ DB_PATH = 'finance_data.db'
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
-        # レポート保存用テーブル
         conn.execute('''
             CREATE TABLE IF NOT EXISTS reports (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,7 +35,6 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        # 🚀 ジョブの進行状況を管理するテーブル（メモリ消滅対策）
         conn.execute('''
             CREATE TABLE IF NOT EXISTS jobs (
                 id TEXT PRIMARY KEY,
@@ -58,7 +56,8 @@ def clean_json_string(json_str):
     json_str = re.sub(r'[\x00-\x1F\x7F]', ' ', json_str)
     return json_str
 
-def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
+# 🚀 コンセンサスの引数を追加
+def parse_financial_pdf_smart(tanshin_path, presentation_path=None, consensus_sales="", consensus_op_profit=""):
     if not client:
         raise ValueError("サーバー側の設定エラー: GEMINI_API_KEY が設定されていません。")
 
@@ -85,35 +84,36 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
         except Exception as e:
             print(f"決算説明資料の読み込みエラー: {e}")
 
+    # 🚀 AIへの指示にコンセンサス比較のミッションを追加
     prompt = f"""
-    あなたはトップティア証券会社のシニア・エクイティアナリストです。提供された「決算短信」と「決算説明資料(ある場合)」から財務数値を抽出し、指定のJSONフォーマットで出力してください。
+    あなたはトップティア証券会社のシニア・エクイティアナリストです。提供された「決算短信」から財務数値を抽出し、指定のJSONフォーマットで出力してください。
 
     【抽出ルール（絶対厳守）】
     - 🚨指定のJSONフォーマットのみを返すこと。JSONの最後の要素には絶対にカンマ(,)をつけないでください。
     - JSONのキーや値の中でダブルクォーテーション(")を使う場合は、必ずエスケープ(\\")してください。
     - 単位はすべて「百万円」に換算・統一してください（例: テキストが「円」や「十億円」なら百万円に変換）。
-    - 損失や減少などのマイナス値はマイナスの数値（例: -100）としてください。「△」や「()」表記はマイナスです。
-    - 「金融機関」（銀行・証券など）の判定は慎重に行い、事業会社は誤って金融機関と判定しないでください。真の金融機関で流動/固定の区分がない場合のみ is_financial を true にしてください。
-    - IFRSの場合は、売上高を「売上収益」、営業利益を「営業利益」、経常利益を「税引前利益」などに設定してください。
+    - 損失や減少などのマイナス値はマイナスの数値（例: -100）としてください。
 
     【超重要：B/S（貸借対照表）の負債・純資産の抽出について】
     - 「流動資産」「固定資産(非流動資産)」「流動負債」「固定負債(非流動負債)」は、必ずそれぞれの「合計値」を抽出してください。
-    - 🚨【絶対厳守】いかなる場合も、負債の項目（流動負債、固定負債）を理由なく0にしないでください。必ず表の中に数値が存在します。
-    - IFRS企業の場合、「非流動負債合計」の数値を bs_fixed_liabilities に必ず入れてください。
-    - もし「固定負債」という項目がなく、「負債合計」と「流動負債」しかない場合は、「負債合計」から「流動負債」を引いた額を「固定負債(bs_fixed_liabilities)」として計算して入れてください。
+    - 🚨【絶対厳守】いかなる場合も、負債の項目を理由なく0にしないでください。
     - 🚨【絶対厳守】純資産（資本合計）は、必ずB/S表の最後にある「純資産合計」（IFRSの場合は資本合計）の数値を抽出してください。「自己資本」ではありません。
 
+    【市場コンセンサス（参考データ）】
+    - 売上高コンセンサス: {consensus_sales} 百万円
+    - 営業利益コンセンサス: {consensus_op_profit} 百万円
+    ※コンセンサスの数値が入力されている場合、会社側の来期予想(forecast_data)と比較し、市場の期待を上回っているか（ポジティブサプライズ）、下回っているか（ネガティブ）を必ず分析に含めてください。
+
     【AIによる要約（ai_analysis）の極意：プロフェッショナル・インサイト】
-    単なる事実の羅列は一切禁止します。投資家が真に求める「付加価値」を提供するため、以下の思考フレームワークを駆使してテキストを生成してください。
-    1. 【業績の因数分解】YoYだけでなくQoQのモメンタムを評価。なぜ儲かったのか分解する。
-    2. 【収益性の持続性とサイクル】足元の高収益（または赤字）は一時的か、構造的か。サイクルのどこにいるのか推測する。
+    単なる事実の羅列は一切禁止します。
+    1. 【業績の因数分解】YoYだけでなくQoQのモメンタムを評価。
+    2. 【収益性の持続性とサイクル】足元の高収益（または赤字）は一時的か、構造的か。
     3. 【財務・CFの実態】現金の増加や借入の減少が成長投資や株主還元にどう直結しているか。
-    4. 【設備投資(CAPEX)の二面性】成長への布石と、将来の供給過剰・減価償却費増リスクを指摘。
-    5. 【株主還元とカタリスト】自社株買い、増配など。
-    6. 【会社予想vs客観的評価】強気な主張を鵜呑みにせず、前提条件が崩れた場合のリスクを提示する。
+    4. 【設備投資(CAPEX)の二面性】成長への布石と、将来の供給過剰リスクを指摘。
+    5. 【会社予想vsコンセンサス】コンセンサスとの乖離幅を評価し、株価への影響（カタリストかリスクか）を鋭く考察する。
 
     【出力フォーマット指定】
-    - 読みやすくするため、重要なキーワードや数値は必ずMarkdownの太字（**テキスト**）を使用してください。
+    - 重要なキーワードや数値は必ずMarkdownの太字（**テキスト**）を使用してください。
     - 文頭には必ず「🟢ポジティブ：」「🔴ネガティブ：」「🟡要注目(リスク)：」のラベルをつけてください。
 
     【対象テキスト】
@@ -128,7 +128,7 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
         "code": "証券コード（数字のみ）",
         "fiscal_year": "対象期（例: 2024年3月期）",
         "is_financial": false,
-        "labels": {{ "sales": "売上収益 または 売上高", "op_profit": "営業利益", "ord_profit": "税引前利益 または 経常利益" }},
+        "labels": {{ "sales": "売上高", "op_profit": "営業利益", "ord_profit": "経常利益" }},
         "bs_current_assets_prev": 0, "bs_current_assets": 0,
         "bs_fixed_assets_prev": 0, "bs_fixed_assets": 0,
         "bs_current_liabilities_prev": 0, "bs_current_liabilities": 0,
@@ -141,9 +141,10 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
         "pl_net_profit_prev": 0, "pl_net_profit_now": 0,
         "cf_operating": 0, "cf_investing": 0, "cf_financing": 0,
         "forecast_data": {{ "sales": 0, "op_profit": 0, "net_profit": 0 }},
+        "consensus_data": {{ "sales": 0, "op_profit": 0 }},
         "ai_analysis": {{
             "tab1_summary": "当期の業績・財務について、プロのアナリストとしての鋭い洞察を箇条書きで出力してください。【600〜800文字程度】",
-            "tab2_summary": "来期の見通し・リスクについて、今後の株価カタリストや客観的なリスク評価を含めた深い洞察を箇条書きで出力してください。【600〜800文字程度】"
+            "tab2_summary": "来期の見通し・コンセンサス比較・リスクについて、今後の株価カタリストを含めた深い洞察を箇条書きで出力してください。【600〜800文字程度】"
         }}
     }}
     """
@@ -158,20 +159,24 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None):
     
     raw_text = response.text.strip()
     cleaned_json_str = clean_json_string(raw_text)
+    data = json.loads(cleaned_json_str)
 
-    return json.loads(cleaned_json_str)
+    # ユーザー入力のコンセンサス数値をJSONに上書き（グラフ描画用）
+    if consensus_sales.isdigit():
+        data['consensus_data']['sales'] = int(consensus_sales)
+    if consensus_op_profit.isdigit():
+        data['consensus_data']['op_profit'] = int(consensus_op_profit)
 
-# 🚀 状態をDBに保存するように変更
-def run_analysis_job(job_id, tanshin_path, presentation_path):
+    return data
+
+def run_analysis_job(job_id, tanshin_path, presentation_path, consensus_sales, consensus_op_profit):
     try:
-        data = parse_financial_pdf_smart(tanshin_path, presentation_path)
+        data = parse_financial_pdf_smart(tanshin_path, presentation_path, consensus_sales, consensus_op_profit)
         with sqlite3.connect(DB_PATH) as conn:
-            # 過去レポの保存
             conn.execute('''
                 INSERT INTO reports (company_name, code, fiscal_year, data_json)
                 VALUES (?, ?, ?, ?)
             ''', (data.get('company'), data.get('code'), data.get('fiscal_year'), json.dumps(data, ensure_ascii=False)))
-            # ジョブステータスの更新
             conn.execute("UPDATE jobs SET status = 'done', data_json = ? WHERE id = ?", (json.dumps(data, ensure_ascii=False), job_id))
     except Exception as e:
         error_msg = str(e)
@@ -194,6 +199,10 @@ def upload_file():
     
     tanshin_file = request.files['tanshin']
     presentation_file = request.files.get('presentation')
+    
+    # 🚀 フォームからコンセンサスの値を受け取る
+    consensus_sales = request.form.get('consensus_sales', '').strip()
+    consensus_op_profit = request.form.get('consensus_op_profit', '').strip()
 
     if tanshin_file.filename == '':
         return jsonify({'success': False, 'error': '決算短信のファイルが選択されていません'})
@@ -208,18 +217,17 @@ def upload_file():
 
     job_id = str(uuid.uuid4())
     
-    # 🚀 ジョブ作成時にDBへ書き込む
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("INSERT INTO jobs (id, status) VALUES (?, ?)", (job_id, 'processing'))
 
-    thread = threading.Thread(target=run_analysis_job, args=(job_id, tanshin_path, presentation_path))
+    # 引数にコンセンサスを追加してスレッド起動
+    thread = threading.Thread(target=run_analysis_job, args=(job_id, tanshin_path, presentation_path, consensus_sales, consensus_op_profit))
     thread.start()
 
     return jsonify({'success': True, 'job_id': job_id})
 
 @app.route('/status/<job_id>', methods=['GET'])
 def check_status(job_id):
-    # 🚀 DBから状態を取得する
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT status, data_json, error_msg FROM jobs WHERE id = ?", (job_id,))

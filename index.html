@@ -232,7 +232,6 @@
             }
         });
 
-        // 🚀 不正なステータスを正しくキャッチしてクルクルを止める処理
         async function pollStatus(jobId) {
             try {
                 const res = await fetch(`/status/${jobId}`);
@@ -317,22 +316,36 @@
             if (bsChartInstance) bsChartInstance.destroy();
             const ctxBs = document.getElementById('bsChart').getContext('2d');
             
+            // 下から上に積み上げるためのデータセット順序
             bsChartInstance = new Chart(ctxBs, {
                 type: 'bar',
                 data: {
                     labels: ['前期 資産', '前期 負債/純資産', '当期 資産', '当期 負債/純資産'],
                     datasets: [
-                        { label: '流動資産', data: [data.bs_current_assets_prev, 0, data.bs_current_assets, 0], backgroundColor: '#25B2C7' },
-                        { label: '固定資産', data: [data.bs_fixed_assets_prev, 0, data.bs_fixed_assets, 0], backgroundColor: '#4984BD' },
-                        { label: '流動負債', data: [0, data.bs_current_liabilities_prev, 0, data.bs_current_liabilities], backgroundColor: '#42B187' },
+                        // --- 負債・純資産の部（一番下） ---
+                        { label: '純資産', data: [0, data.bs_equity_prev, 0, data.bs_equity], backgroundColor: '#F77261' },
+                        // --- 負債・純資産の部（真ん中） ---
                         { label: '固定負債', data: [0, data.bs_fixed_liabilities_prev, 0, data.bs_fixed_liabilities], backgroundColor: '#C4BF4D' },
-                        { label: '純資産', data: [0, data.bs_equity_prev, 0, data.bs_equity], backgroundColor: '#F77261' }
+                        // --- 負債・純資産の部（一番上） ---
+                        { label: '流動負債', data: [0, data.bs_current_liabilities_prev, 0, data.bs_current_liabilities], backgroundColor: '#42B187' },
+                        // --- 資産の部（下） ---
+                        { label: '固定資産', data: [data.bs_fixed_assets_prev, 0, data.bs_fixed_assets, 0], backgroundColor: '#4984BD' },
+                        // --- 資産の部（上） ---
+                        { label: '流動資産', data: [data.bs_current_assets_prev, 0, data.bs_current_assets, 0], backgroundColor: '#25B2C7' }
                     ]
                 },
                 options: {
                     responsive: true,
-                    scales: { x: { stacked: true }, y: { stacked: true } },
-                    plugins: { legend: { position: 'top' } }
+                    scales: { 
+                        x: { stacked: true }, 
+                        y: { stacked: true } 
+                    },
+                    plugins: { 
+                        legend: { 
+                            position: 'top',
+                            reverse: true // これで凡例の並びも「上から流動→固定」の順になります
+                        } 
+                    }
                 }
             });
 

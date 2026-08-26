@@ -64,6 +64,7 @@ def clean_json_string(json_str):
     json_str = re.sub(r'[\x00-\x1F\x7F]', ' ', json_str)
     return json_str
 
+# 🚀 【超強化版】IFISからどんな表構造でも数字を引っこ抜く関数
 def fetch_japan_consensus(code):
     sales, op_profit = "", ""
     if not BeautifulSoup:
@@ -71,62 +72,50 @@ def fetch_japan_consensus(code):
         return sales, op_profit
         
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
     }
     
-    # ターゲット1: みんかぶ
+    print(f"🌐 IFIS(株予報)から {code} のコンセンサスを取得します...", flush=True)
     try:
-        url = f"https://minkabu.jp/stock/{code}/consensus"
-        res = requests.get(url, headers=headers, timeout=5)
+        url_ifis = f"https://kabuyoho.ifis.co.jp/index.php?action=tp1&sa=report_con&bcode={code}"
+        res = requests.get(url_ifis, headers=headers, timeout=5)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
             for tr in soup.find_all('tr'):
                 th = tr.find('th')
-                if th:
-                    th_text = th.get_text(strip=True)
-                    tds = tr.find_all('td')
-                    if "売上高" in th_text and len(tds) >= 2:
-                        val = tds[1].get_text(strip=True).replace(',', '')
-                        match = re.search(r'[-]?\d+', val)
-                        if match and not sales: sales = match.group(0)
-                    elif ("営業利益" in th_text or "営業益" in th_text) and len(tds) >= 2:
-                        val = tds[1].get_text(strip=True).replace(',', '')
-                        match = re.search(r'[-]?\d+', val)
-                        if match and not op_profit: op_profit = match.group(0)
-            print(f"✅ みんかぶ抽出完了: 売上={sales}, 営利={op_profit}", flush=True)
+                if not th: continue
+                th_text = th.get_text(strip=True)
+                
+                # 売上か営業利益の行を見つけたら
+                if "売上高" in th_text or "営業利益" in th_text or "営業益" in th_text:
+                    nums = []
+                    # その行の中にある「すべての数字」をリストアップする
+                    for td in tr.find_all('td'):
+                        txt = td.get_text(strip=True).replace(',', '')
+                        match = re.search(r'[-]?\d+', txt)
+                        if match:
+                            nums.append(match.group(0))
+                    
+                    # IFISの表は [会社予想, コンセンサス, 前週比...] の順に並ぶ
+                    # なので2番目の数字(nums[1])がコンセンサス。無ければ1番目を取る。
+                    val = ""
+                    if len(nums) >= 2:
+                        val = nums[1]
+                    elif len(nums) == 1:
+                        val = nums[0]
+                        
+                    if "売上高" in th_text and not sales:
+                        sales = val
+                    elif ("営業利益" in th_text or "営業益" in th_text) and not op_profit:
+                        op_profit = val
+                        
+            print(f"✅ IFIS抽出完了: 売上={sales}, 営利={op_profit}", flush=True)
         else:
-            print(f"⚠️ みんかぶアクセス拒否 (ステータスコード: {res.status_code})", flush=True)
+            print(f"⚠️ IFISアクセス拒否 (ステータスコード: {res.status_code})", flush=True)
     except Exception as e:
-        print(f"⚠️ みんかぶ通信エラー: {e}", flush=True)
-
-    # ターゲット2: IFIS（株予報）
-    if not sales or not op_profit:
-        print("⚠️ みんかぶで取得できなかったため、IFIS(株予報)へアクセスします...", flush=True)
-        try:
-            url_ifis = f"https://kabuyoho.ifis.co.jp/index.php?action=tp1&sa=report_con&bcode={code}"
-            res = requests.get(url_ifis, headers=headers, timeout=5)
-            if res.status_code == 200:
-                soup = BeautifulSoup(res.text, 'html.parser')
-                for tr in soup.find_all('tr'):
-                    th = tr.find('th')
-                    if th:
-                        th_text = th.get_text(strip=True)
-                        tds = tr.find_all('td')
-                        if "売上高" in th_text and len(tds) >= 2:
-                            val = tds[1].get_text(strip=True).replace(',', '')
-                            match = re.search(r'[-]?\d+', val)
-                            if match and not sales: sales = match.group(0)
-                        elif "営業利益" in th_text and len(tds) >= 2:
-                            val = tds[1].get_text(strip=True).replace(',', '')
-                            match = re.search(r'[-]?\d+', val)
-                            if match and not op_profit: op_profit = match.group(0)
-                print(f"✅ IFIS抽出完了: 売上={sales}, 営利={op_profit}", flush=True)
-            else:
-                print(f"⚠️ IFISアクセス拒否 (ステータスコード: {res.status_code})", flush=True)
-        except Exception as e:
-            print(f"⚠️ IFIS通信エラー: {e}", flush=True)
+        print(f"⚠️ IFIS通信エラー: {e}", flush=True)
 
     return sales, op_profit
 
@@ -145,11 +134,10 @@ def parse_financial_pdf_smart(tanshin_path, presentation_path=None, consensus_sa
             if text:
                 all_text += f"--- 短信 Page {i+1} ---\n{text}\n\n"
 
-    # 🚀 コード読み取りを強化！全角数字やスペースにも対応
+    # コンセンサスの自動取得
     if not consensus_sales or not consensus_op_profit:
         match = re.search(r'(?:証券コード|コード番号|銘柄コード|コード)[^\d]*([0-9０-９]{4})', all_text[:3000])
         if match:
-            # 全角数字が含まれていても半角に変換
             code = match.group(1).translate(str.maketrans('０１２３４５６７８９', '0123456789'))
             print(f"🔍 証券コード {code} を検出。コンセンサスを自動取得します...", flush=True)
             auto_sales, auto_op_profit = fetch_japan_consensus(code)

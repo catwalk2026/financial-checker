@@ -64,7 +64,7 @@ def clean_json_string(json_str):
     json_str = re.sub(r'[\x00-\x1F\x7F]', ' ', json_str)
     return json_str
 
-# 🚀 【超強化版】IFISからどんな表構造でも数字を引っこ抜く関数
+# 🚀 【最強版】IFISからどんな表構造でも数字を引っこ抜く関数
 def fetch_japan_consensus(code):
     sales, op_profit = "", ""
     if not BeautifulSoup:
@@ -72,9 +72,7 @@ def fetch_japan_consensus(code):
         return sales, op_profit
         
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     }
     
     print(f"🌐 IFIS(株予報)から {code} のコンセンサスを取得します...", flush=True)
@@ -84,33 +82,30 @@ def fetch_japan_consensus(code):
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
             for tr in soup.find_all('tr'):
-                th = tr.find('th')
-                if not th: continue
-                th_text = th.get_text(strip=True)
+                # 行の中にあるすべてのセル（td, th）を取得
+                cells = tr.find_all(['td', 'th'])
+                if not cells: continue
                 
-                # 売上か営業利益の行を見つけたら
-                if "売上高" in th_text or "営業利益" in th_text or "営業益" in th_text:
+                # 1番目のセル（ラベル）を確認
+                label = cells[0].get_text(strip=True)
+                if "売上" in label or "営業利" in label or "営業益" in label:
                     nums = []
-                    # その行の中にある「すべての数字」をリストアップする
-                    for td in tr.find_all('td'):
-                        txt = td.get_text(strip=True).replace(',', '')
+                    # ラベル以外のセルから数値をしらみつぶしに抽出
+                    for cell in cells[1:]:
+                        txt = cell.get_text(strip=True).replace(',', '')
                         match = re.search(r'[-]?\d+', txt)
                         if match:
                             nums.append(match.group(0))
-                    
-                    # IFISの表は [会社予想, コンセンサス, 前週比...] の順に並ぶ
-                    # なので2番目の数字(nums[1])がコンセンサス。無ければ1番目を取る。
-                    val = ""
-                    if len(nums) >= 2:
-                        val = nums[1]
-                    elif len(nums) == 1:
-                        val = nums[0]
+                            
+                    if nums:
+                        # IFISの表は通常 [会社予想, コンセンサス] の順なので、2番目(インデックス1)を採用
+                        val = nums[1] if len(nums) >= 2 else nums[0]
                         
-                    if "売上高" in th_text and not sales:
-                        sales = val
-                    elif ("営業利益" in th_text or "営業益" in th_text) and not op_profit:
-                        op_profit = val
-                        
+                        if "売上" in label and not sales:
+                            sales = val
+                        elif ("営業利" in label or "営業益" in label) and not op_profit:
+                            op_profit = val
+                            
             print(f"✅ IFIS抽出完了: 売上={sales}, 営利={op_profit}", flush=True)
         else:
             print(f"⚠️ IFISアクセス拒否 (ステータスコード: {res.status_code})", flush=True)
